@@ -35,30 +35,36 @@ st.markdown("---")
 # 2. CARGA Y PREPARACIÓN DE DATOS
 @st.cache_data
 def load_data():
-    # Cargar el parquet generado
-    df = pd.read_parquet("datos_tesis.parquet")
+    try:
+        df = pd.read_parquet("datos_tesis.parquet")
+    except Exception:
+        # Fallback si aún no tienes el parquet o hay error de carga
+        st.error("No se encontró 'datos_tesis.parquet'. Por favor asegúrate de haber convertido tu base.")
+        st.stop()
     
-    # Asegurar que fecha sea datetime
     df['fecha'] = pd.to_datetime(df['fecha'])
     
-    # Convertir variables objetivo a dummies numéricas para cálculos ponderados
-    # Basado en tu muestra: formal_ss ('formal'/'informal') y part_mercadol ('Participa'/'Inactivo')
-    df['formal_num'] = np.where(df['formal_ss'].str.lower() == 'formal', 1.0, 0.0)
-    df['part_num'] = np.where(df['part_mercadol'].str.lower().str.contains('participa'), 1.0, 0.0)
+    # Conversión de variables a numéricas para cálculos ponderados
+    df['formal_num'] = np.where(df['formal_ss'].astype(str).str.lower() == 'formal', 1.0, 0.0)
+    df['part_num'] = np.where(df['part_mercadol'].astype(str).str.lower().str.contains('participa'), 1.0, 0.0)
     
     return df
 
-try:
-    df = load_data()
-except Exception as e:
-    st.error(f"Error al cargar 'datos_tesis.parquet': {e}")
-    st.stop()
+df = load_data()
 
-# 3. PANEL LATERAL (FILTROS THOMAS)
+# 3. PANEL LATERAL (FILTROS BLINDADOS CONTRA NULOS Y TIPOS)
 st.sidebar.markdown("### 🔍 Segmentación de Muestra")
-clase_sel = st.sidebar.multiselect("Clase (Urbano/Rural)", options=df['clase'].unique(), default=df['clase'].unique())
-area_sel = st.sidebar.multiselect("Áreas (Ciudades)", options=sorted(df['area'].unique()), default=df['area'].unique()[:5])
-posicion_sel = st.sidebar.multiselect("Posición Ocupacional", options=df['posicion_ocup'].unique(), default=["Asalariados (Empresa/Gobierno)"])
+
+# Solución al TypeError: dropna() + astype(str) antes de sorted()
+clase_options = sorted(df['clase'].dropna().astype(str).unique())
+area_options = sorted(df['area'].dropna().astype(str).unique())
+posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
+
+clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", options=clase_options, default=clase_options)
+area_sel = st.sidebar.multiselect("Áreas (Ciudades)", options=area_options, default=area_options[:5])
+
+default_pos = ["Asalariados (Empresa/Gobierno)"] if "Asalariados (Empresa/Gobierno)" in posicion_options else posicion_options[:1]
+posicion_sel = st.sidebar.multiselect("Posición Ocupacional", options=posicion_options, default=default_pos)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📈 Configuración de Tendencias")
@@ -67,8 +73,10 @@ ventana_sel = st.sidebar.radio("Ventana de Tiempo (Ley: Mayo 2016)",
 
 suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
 
-# Aplicar filtros
-df_f = df[(df['clase'].isin(clase_sel)) & (df['area'].isin(area_sel)) & (df['posicion_ocup'].isin(posicion_sel))].copy()
+# Aplicación de filtros
+df_f = df[(df['clase'].astype(str).isin(clase_sel)) & 
+          (df['area'].astype(str).isin(area_sel)) & 
+          (df['posicion_ocup'].astype(str).isin(posicion_sel))].copy()
 
 # Lógica de Ventanas de Tiempo
 fecha_ley = pd.to_datetime('2016-05-01')
@@ -89,13 +97,12 @@ def weighted_stats(data):
     f = (data['formal_num'] * data['fex18']).sum() / w
     p = (data['part_num'] * data['fex18']).sum() / w
     
-    # Salario solo para ocupados
     df_s = data[data['inglabo_real'] > 0]
     s = (df_s['inglabo_real'] * df_s['fex18']).sum() / df_s['fex18'].sum() if df_s['fex18'].sum() > 0 else 0.0
     
     return pd.Series([f, p, s], index=cols)
 
-# Agrupación por mes y grupo de edad (young)
+# Agrupación por mes y grupo (Solución include_groups=False)
 if not df_f.empty:
     ts_data = df_f.groupby(['fecha', 'young']).apply(weighted_stats, include_groups=False).reset_index()
     
@@ -104,7 +111,7 @@ if not df_f.empty:
         ts_data[f'{target}_S'] = ts_data.groupby('young')[target].transform(lambda x: x.rolling(suavizado, min_periods=1).mean())
         ts_data[f'{target}_Diff'] = ts_data.groupby('young')[target].transform(lambda x: x.diff(12))
 else:
-    st.warning("No hay datos para los filtros seleccionados.")
+    st.warning("No hay datos para esta combinación de filtros.")
     st.stop()
 
 # 5. KPIs
@@ -114,7 +121,7 @@ k2.metric("Muestra (N)", f"{len(df_f):,}")
 k3.metric("Formalidad Promedio", f"{ts_data['Tasa_Formalidad'].mean()*100:.1f}%")
 k4.metric("Participación Promedio", f"{ts_data['Tasa_Participacion'].mean()*100:.1f}%")
 
-# 6. GRÁFICAS
+# 6. GRÁFICAS (ESTILO THOMAS)
 layout_ui = dict(
     paper_bgcolor='#170a29', plot_bgcolor='#170a29', font=dict(color="#d4c5e8"),
     xaxis=dict(showgrid=False, color='#bbaacc'),
@@ -127,15 +134,15 @@ c1, c2 = st.columns(2)
 with c1:
     st.markdown("#### Tasa de Formalidad (Niveles Suavizados)")
     fig1 = px.line(ts_data, x='fecha', y='Tasa_Formalidad_S', color='young', color_discrete_map=colores)
-    fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+    fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14", annotation_text="Ley 1780")
     fig1.update_layout(**layout_ui, yaxis=dict(tickformat=".1%"))
     st.plotly_chart(fig1, use_container_width=True)
 
 with c2:
     st.markdown("#### Cambios YoY en Formalidad (t vs t-12)")
-    fig2 = px.line(ts_data.dropna(), x='fecha', y='Tasa_Formalidad_Diff', color='young', color_discrete_map=colores)
+    fig2 = px.line(ts_data.dropna(subset=['Tasa_Formalidad_Diff']), x='fecha', y='Tasa_Formalidad_Diff', color='young', color_discrete_map=colores)
     fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig2.update_layout(**layout_ui)
+    fig2.update_layout(**layout_ui, yaxis=dict(title="Cambio en Puntos Porcentuales"))
     st.plotly_chart(fig2, use_container_width=True)
 
 c3, c4 = st.columns(2)
@@ -151,9 +158,9 @@ with c4:
     fig4.update_layout(**layout_ui, yaxis=dict(tickformat="$,.0f"))
     st.plotly_chart(fig4, use_container_width=True)
 
-# 7. ESTADÍSTICAS DE CONTROLES (PARA THOMAS)
+# 7. ESTADÍSTICAS DE CONTROLES (TABLA DE ROBUSTEZ)
 st.markdown("---")
-st.markdown("#### Estadísticas Descriptivas de Controles (Ponderadas por FEX)")
+st.markdown("#### Estadísticas Descriptivas de Controles (Ponderadas)")
 df_f['Periodo'] = np.where(df_f['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
 
 def get_controls(x):
