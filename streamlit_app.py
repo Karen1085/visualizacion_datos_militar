@@ -38,7 +38,6 @@ def load_data():
     try:
         df = pd.read_parquet("datos_tesis.parquet")
     except Exception:
-        # Fallback si aún no tienes el parquet o hay error de carga
         st.error("No se encontró 'datos_tesis.parquet'. Por favor asegúrate de haber convertido tu base.")
         st.stop()
     
@@ -52,10 +51,9 @@ def load_data():
 
 df = load_data()
 
-# 3. PANEL LATERAL (FILTROS BLINDADOS CONTRA NULOS Y TIPOS)
+# 3. PANEL LATERAL (FILTROS BLINDADOS)
 st.sidebar.markdown("### 🔍 Segmentación de Muestra")
 
-# Solución al TypeError: dropna() + astype(str) antes de sorted()
 clase_options = sorted(df['clase'].dropna().astype(str).unique())
 area_options = sorted(df['area'].dropna().astype(str).unique())
 posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
@@ -87,7 +85,7 @@ elif "12m" in ventana_sel:
 elif "6m" in ventana_sel:
     df_f = df_f[(df_f['fecha'] >= fecha_ley - pd.DateOffset(months=6)) & (df_f['fecha'] <= fecha_ley + pd.DateOffset(months=12))]
 
-# 4. MOTOR DE CÁLCULO PONDERADO (REPARADO PARA EVITAR KEYERROR)
+# 4. MOTOR DE CÁLCULO PONDERADO
 def weighted_stats(data):
     w = data['fex18'].sum()
     cols = ['Tasa_Formalidad', 'Tasa_Participacion', 'Salario_Real']
@@ -102,7 +100,7 @@ def weighted_stats(data):
     
     return pd.Series([f, p, s], index=cols)
 
-# Agrupación por mes y grupo (Solución include_groups=False)
+# Agrupación por mes y grupo
 if not df_f.empty:
     ts_data = df_f.groupby(['fecha', 'young']).apply(weighted_stats, include_groups=False).reset_index()
     
@@ -135,27 +133,35 @@ with c1:
     st.markdown("#### Tasa de Formalidad (Niveles Suavizados)")
     fig1 = px.line(ts_data, x='fecha', y='Tasa_Formalidad_S', color='young', color_discrete_map=colores)
     fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14", annotation_text="Ley 1780")
-    fig1.update_layout(**layout_ui, yaxis=dict(tickformat=".1%"))
+    # CORRECCIÓN AQUÍ: update_layout separado de update_yaxes
+    fig1.update_layout(**layout_ui)
+    fig1.update_yaxes(tickformat=".1%")
     st.plotly_chart(fig1, use_container_width=True)
 
 with c2:
     st.markdown("#### Cambios YoY en Formalidad (t vs t-12)")
     fig2 = px.line(ts_data.dropna(subset=['Tasa_Formalidad_Diff']), x='fecha', y='Tasa_Formalidad_Diff', color='young', color_discrete_map=colores)
     fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig2.update_layout(**layout_ui, yaxis=dict(title="Cambio en Puntos Porcentuales"))
+    # CORRECCIÓN AQUÍ
+    fig2.update_layout(**layout_ui)
+    fig2.update_yaxes(title="Cambio en Puntos Porcentuales")
     st.plotly_chart(fig2, use_container_width=True)
 
 c3, c4 = st.columns(2)
 with c3:
     st.markdown("#### Tasa de Participación (PEA)")
     fig3 = px.line(ts_data, x='fecha', y='Tasa_Participacion_S', color='young', color_discrete_map=colores)
-    fig3.update_layout(**layout_ui, yaxis=dict(tickformat=".1%"))
+    # CORRECCIÓN AQUÍ
+    fig3.update_layout(**layout_ui)
+    fig3.update_yaxes(tickformat=".1%")
     st.plotly_chart(fig3, use_container_width=True)
 
 with c4:
     st.markdown("#### Salario Real Promedio")
     fig4 = px.line(ts_data, x='fecha', y='Salario_Real_S', color='young', color_discrete_map=colores)
-    fig4.update_layout(**layout_ui, yaxis=dict(tickformat="$,.0f"))
+    # CORRECCIÓN AQUÍ
+    fig4.update_layout(**layout_ui)
+    fig4.update_yaxes(tickformat="$,.0f")
     st.plotly_chart(fig4, use_container_width=True)
 
 # 7. ESTADÍSTICAS DE CONTROLES (TABLA DE ROBUSTEZ)
