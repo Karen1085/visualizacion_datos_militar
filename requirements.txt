@@ -4,3 +4,8 @@ plotly
 numpy
 pyarrow
 fastparquet
+streamlit
+pandas
+plotly
+numpy
+pyarrow
