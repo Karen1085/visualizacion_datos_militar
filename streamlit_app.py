@@ -43,7 +43,7 @@ def load_data():
 
 df = load_data()
 
-# 3. PANEL LATERAL (TODOS LOS FILTROS DE LA BASE)
+# 3. PANEL LATERAL (FILTROS DE LA TESIS)
 st.sidebar.markdown("### 🔍 Filtros de la Tesis")
 
 # Espaciales
@@ -55,11 +55,10 @@ clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_options, default
 area_sel = st.sidebar.multiselect("Áreas Metropolitanas", area_options, default=area_options[:5])
 dpto_sel = st.sidebar.multiselect("Departamento", dpto_options)
 
-# Socioeconómicos (Los que creamos)
+# Socioeconómicos
 rol_sel = st.sidebar.multiselect("Rol en el Hogar", options=df['rol_hogar'].unique(), default=df['rol_hogar'].unique())
 est_sel = st.sidebar.multiselect("Estado Civil", options=df['estado_civil'].unique(), default=df['estado_civil'].unique())
 pos_sel = st.sidebar.multiselect("Posición Ocupacional", options=df['posicion_ocup'].unique(), default=["Asalariados (Empresa/Gobierno)"])
-sexo_sel = st.sidebar.multiselect("Sexo", options=df['sexo'].unique(), default=df['sexo'].unique())
 
 st.sidebar.markdown("---")
 ventana_sel = st.sidebar.radio("Periodo de Evaluación", [
@@ -67,11 +66,10 @@ ventana_sel = st.sidebar.radio("Periodo de Evaluación", [
 ])
 suavizado = st.sidebar.slider("Meses de Suavizado", 1, 12, 3)
 
-# 4. LÓGICA DE FILTRADO DOBLE
+# 4. LÓGICA DE FILTRADO
 # df_geo: Para Participación (Población total)
 df_geo = df[(df['clase'].isin(clase_sel)) & (df['area'].isin(area_sel)) & 
-            (df['rol_hogar'].isin(rol_sel)) & (df['estado_civil'].isin(est_sel)) & 
-            (df['sexo'].isin(sexo_sel))].copy()
+            (df['rol_hogar'].isin(rol_sel)) & (df['estado_civil'].isin(est_sel))].copy()
 
 if dpto_sel: df_geo = df_geo[df_geo['dpto'].isin(dpto_sel)]
 
@@ -90,7 +88,7 @@ df_geo = aplicar_ventana(df_geo, ventana_sel)
 df_f = aplicar_ventana(df_f, ventana_sel)
 
 # 5. CÁLCULOS PONDERADOS
-def calc_stats(x, is_geo=False):
+def calc_stats(x):
     w = x['fex18'].sum()
     if w == 0: return pd.Series([0.0]*3, index=['Formalidad', 'Participacion', 'Salario'])
     
@@ -117,11 +115,18 @@ else:
 # 6. DASHBOARD - 3 GRÁFICAS POR LÍNEA
 st.title("Impacto Ley 1780: Evaluación de Resultados")
 
-# KPIs
+# KPIs SUPERIORES
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Población Expandida", f"{int(df_geo['fex18'].sum()):,}")
-sal_prom = (df_f[df_f['inglabo_real']>0]['inglabo_real'] * df_f[df_f['inglabo_real']>0]['fex18']).sum() / df_f[df_f['inglabo_real']>0]['fex18'].sum()
+
+# Ingreso Laboral Promedio Real
+df_sal_ocup = df_f[df_f['inglabo_real'] > 0]
+if not df_sal_ocup.empty:
+    sal_prom = (df_sal_ocup['inglabo_real'] * df_sal_ocup['fex18']).sum() / df_sal_ocup['fex18'].sum()
+else:
+    sal_prom = 0
 k2.metric("Ingreso Laboral Promedio", f"${sal_prom:,.0f}")
+
 k3.metric("Formalidad Promedio", f"{(ts['Formalidad'].mean()*100):.1f}%")
 k4.metric("Participación (PEA)", f"{(ts['Participacion'].mean()*100):.1f}%")
 
@@ -145,23 +150,25 @@ def dibujar_fila(metric, label, is_pct=True):
         if is_pct: fig.update_yaxes(tickformat=".1%", range=[0, 1] if metric=="Participacion" else None)
         st.plotly_chart(fig, use_container_width=True)
     
-    # 2. Cambios (t vs t-12)
+    # 2. Cambios YoY (t vs t-12)
     with c2:
-        fig = px.line(ts.dropna(), x='fecha', y=f'{metric}_Diff', color='young', color_discrete_map=colores, title=f"Cambios YoY en {label}")
+        fig = px.line(ts.dropna(subset=[f'{metric}_Diff']), x='fecha', y=f'{metric}_Diff', color='young', color_discrete_map=colores, title=f"Cambio YoY en {label}")
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
+        if is_pct: fig.update_yaxes(tickformat=".2f") # Puntos porcentuales
         st.plotly_chart(fig, use_container_width=True)
         
-    # 3. Validación DiD (Brecha)
+    # 3. Validación DiD (Brecha Tratamiento vs Control)
     with c3:
         pivot = ts.pivot(index='fecha', columns='young', values=f'{metric}_S')
         if 'Hombres 18-24' in pivot.columns and 'Hombres 25-28' in pivot.columns:
             pivot['Gap'] = pivot['Hombres 18-24'] - pivot['Hombres 25-28']
-            fig = px.bar(pivot.reset_index(), x='fecha', y='Gap', title=f"Brecha DiD (Trat. vs Control)", color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
+            fig = px.bar(pivot.reset_index(), x='fecha', y='Gap', title=f"Brecha DiD (Trat. vs Cont.)", color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
             fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
             fig.update_layout(**layout_ui, coloraxis_showscale=False)
             st.plotly_chart(fig, use_container_width=True)
 
+# Dibujar las 3 filas objetivo
 dibujar_fila("Formalidad", "Formalidad Laboral")
 dibujar_fila("Salario", "Ingreso Laboral Real", is_pct=False)
 dibujar_fila("Participacion", "Participación (PEA)")
@@ -169,9 +176,11 @@ dibujar_fila("Participacion", "Participación (PEA)")
 st.markdown("---")
 st.markdown("#### Estadísticas Descriptivas Ponderadas")
 df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
+
 def get_desc(x):
     w = x['fex18'].sum()
     if w == 0: return pd.Series([0.0, 0.0], index=['Escolaridad', 'Edad'])
     return pd.Series([(x['años_escolaridad']*x['fex18']).sum()/w, (x['edad']*x['fex18']).sum()/w], index=['Escolaridad', 'Edad'])
+
 desc_table = df_geo.groupby(['young', 'Periodo']).apply(get_desc).reset_index()
 st.dataframe(desc_table.sort_values(['young', 'Periodo'], ascending=[True, False]), use_container_width=True, hide_index=True)
