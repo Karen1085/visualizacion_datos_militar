@@ -45,7 +45,7 @@ def load_data():
 df = load_data()
 
 # 3. PANEL LATERAL (FILTROS Y VENTANAS EXACTAS)
-st.sidebar.markdown("###  Filtros Territoriales")
+st.sidebar.markdown("### 🔍 Filtros Territoriales")
 clase_options = sorted(df['clase'].dropna().astype(str).unique())
 area_options = sorted(df['area'].dropna().astype(str).unique())
 posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
@@ -53,7 +53,7 @@ posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
 clase_sel = st.sidebar.multiselect("Zona (Clase)", options=clase_options, default=clase_options)
 area_sel = st.sidebar.multiselect("Áreas Metropolitanas", options=area_options, default=area_options[:5])
 
-st.sidebar.markdown("###  Filtro de Ocupación")
+st.sidebar.markdown("### 💼 Filtro de Ocupación")
 default_pos = ["Asalariados (Empresa/Gobierno)"] if "Asalariados (Empresa/Gobierno)" in posicion_options else posicion_options[:1]
 posicion_sel = st.sidebar.multiselect("Posición Ocupacional", options=posicion_options, default=default_pos)
 
@@ -166,7 +166,7 @@ with c4:
 
 # 9. SECCIÓN ECONOMÉTRICA (PARA THOMAS)
 st.markdown("---")
-st.markdown("### Validación Econométrica: Diferencias en Diferencias")
+st.markdown("### 📊 Validación Econométrica: Diferencias en Diferencias")
 
 c5, c6 = st.columns([2, 1])
 
