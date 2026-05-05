@@ -47,7 +47,7 @@ def load_data():
 df = load_data()
 
 # 3. PANEL LATERAL (FILTROS)
-st.sidebar.markdown("### 🔍 Filtros de Análisis")
+st.sidebar.markdown("### Filtros de Análisis")
 clase_options = sorted(df['clase'].dropna().astype(str).unique())
 area_options = sorted(df['area'].dropna().astype(str).unique())
 posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
