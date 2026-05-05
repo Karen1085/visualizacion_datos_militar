@@ -4,8 +4,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 
-# 1. CONFIGURACIÓN DE INTERFAZ CORPORATIVA
-st.set_page_config(page_title="Tesis Karen - Impacto Ley 1780", layout="wide", initial_sidebar_state="expanded")
+# 1. CONFIGURACIÓN DE INTERFAZ (ESTILO NEON / CYBERPUNK)
+st.set_page_config(page_title="Tesis Karen - Evaluación DiD Ley 1780", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -16,187 +16,148 @@ st.markdown("""
     div[data-baseweb="select"] > div { background-color: #1a0d2b !important; border: 1px solid #3d2063 !important; color: #ffffff !important; }
     ul[data-baseweb="menu"] { background-color: #1a0d2b !important; }
     ul[data-baseweb="menu"] li { color: #ffffff !important; }
-    h1, h2, h3, h4 { color: #ffffff !important; font-weight: 500; }
+    h1, h2, h3, h4 { color: #ffffff !important; font-weight: 500; font-size: 1.1rem; }
     p, label { color: #ffffff !important; }
-    div[data-testid="metric-container"] { background-color: #170a29; border-top: 3px solid #b400ff; padding: 15px; border-radius: 8px; }
-    div[data-testid="stMetricLabel"] { color: #ffffff !important; text-transform: uppercase; }
-    div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.8rem !important; font-weight: bold; }
+    div[data-testid="metric-container"] { 
+        background-color: #170a29; border-top: 3px solid #b400ff; 
+        padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    div[data-testid="stMetricLabel"] { color: #ffffff !important; text-transform: uppercase; font-size: 0.75rem !important; }
+    div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.7rem !important; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Impacto de la Ley 1780 (ProJoven) en el Mercado Laboral")
-st.markdown("Análisis Descriptivo y Validación de Supuestos DiD - Factor de Expansión GEIH")
-st.markdown("---")
-
-# 2. CARGA DE DATOS (CON CAPTURA DE ERRORES VISIBLE)
+# 2. CARGA DE DATOS
 @st.cache_data
 def load_data():
-    try:
-        df = pd.read_parquet("datos_tesis.parquet")
-    except Exception as e:
-        st.error(f"Error cargando los datos: {str(e)}. Verifica tu requirements.txt y el archivo parquet.")
-        st.stop()
-        
+    df = pd.read_parquet("datos_tesis.parquet")
     df['fecha'] = pd.to_datetime(df['fecha'])
+    # Normalización de dummies numéricas
     df['formal_num'] = np.where(df['formal_ss'].astype(str).str.strip().str.lower() == 'formal', 1.0, 0.0)
     df['part_num'] = np.where(df['part_mercadol'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
     return df
 
 df = load_data()
 
-# 3. PANEL LATERAL
-st.sidebar.markdown("### Filtros Territoriales")
+# 3. PANEL LATERAL: TODOS LOS FILTROS
+st.sidebar.markdown("### 📊 Variables de Control")
+
+# Filtros Territoriales
 clase_options = sorted(df['clase'].dropna().astype(str).unique())
 area_options = sorted(df['area'].dropna().astype(str).unique())
-posicion_options = sorted(df['posicion_ocup'].dropna().astype(str).unique())
+dpto_options = sorted(df['dpto'].dropna().astype(str).unique())
 
-clase_sel = st.sidebar.multiselect("Zona (Clase)", options=clase_options, default=clase_options)
-area_sel = st.sidebar.multiselect("Áreas Metropolitanas", options=area_options, default=area_options[:5])
+clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_options, default=clase_options)
+area_sel = st.sidebar.multiselect("Ciudades Principales", area_options, default=area_options[:3])
+dpto_sel = st.sidebar.multiselect("Departamentos", dpto_options)
 
-st.sidebar.markdown("### Filtro de Ocupación")
-default_pos = ["Asalariados (Empresa/Gobierno)"] if "Asalariados (Empresa/Gobierno)" in posicion_options else posicion_options[:1]
-posicion_sel = st.sidebar.multiselect("Posición Ocupacional (Para Formalidad)", options=posicion_options, default=default_pos)
+# Filtros Socioeconómicos
+sexo_sel = st.sidebar.multiselect("Sexo", options=df['sexo'].unique(), default=df['sexo'].unique())
+rol_sel = st.sidebar.multiselect("Rol en Hogar", options=df['rol_hogar'].unique(), default=df['rol_hogar'].unique())
+est_sel = st.sidebar.multiselect("Estado Civil", options=df['estado_civil'].unique(), default=df['estado_civil'].unique())
+pos_sel = st.sidebar.multiselect("Posición Ocupacional", options=df['posicion_ocup'].unique(), default=["Asalariados (Empresa/Gobierno)"])
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Análisis de Sensibilidad (Bandwidth)")
-ventana_sel = st.sidebar.radio("Periodo de Evaluación (Política: Mayo 2016)", [
-    "1. 6m antes y 6m después", 
-    "2. 12m antes y 12m después", 
-    "3. 24m antes y 24m después",
-    "4. Todo el periodo de análisis"
-])
-suavizado = st.sidebar.slider("Suavizado (Media Móvil)", 1, 12, 3)
+ventana_sel = st.sidebar.radio("Ventana de Tiempo (Política: Mayo 2016)", 
+                               ["1. 6m antes / 6m después", "2. 12m antes / 12m después", "3. 24m antes / 24m después", "4. Periodo Completo"])
+suavizado = st.sidebar.slider("Meses de Suavizado", 1, 12, 3)
 
-# 4. LÓGICA DE FILTRADO
-df_geo = df[(df['clase'].astype(str).isin(clase_sel)) & (df['area'].astype(str).isin(area_sel))].copy()
-df_f = df_geo[df_geo['posicion_ocup'].astype(str).isin(posicion_sel)].copy()
+# 4. LÓGICA DE FILTRADO Y VENTANAS
 fecha_ley = pd.to_datetime('2016-05-01')
+df_f = df[(df['clase'].astype(str).isin(clase_sel)) & 
+          (df['area'].astype(str).isin(area_sel)) &
+          (df['sexo'].isin(sexo_sel)) &
+          (df['rol_hogar'].isin(rol_sel)) &
+          (df['estado_civil'].isin(est_sel)) &
+          (df['posicion_ocup'].isin(pos_sel))].copy()
 
-def aplicar_ventana(data, ventana):
-    if "1." in ventana:
-        return data[(data['fecha'] >= fecha_ley - pd.DateOffset(months=6)) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=6))]
-    elif "2." in ventana:
-        return data[(data['fecha'] >= fecha_ley - pd.DateOffset(months=12)) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=12))]
-    elif "3." in ventana:
-        return data[(data['fecha'] >= fecha_ley - pd.DateOffset(months=24)) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=24))]
-    return data
+if dpto_sel:
+    df_f = df_f[df_f['dpto'].isin(dpto_sel)]
 
-df_geo = aplicar_ventana(df_geo, ventana_sel)
-df_f = aplicar_ventana(df_f, ventana_sel)
+def filtrar_ventana(data, ventana):
+    if "1." in ventana: m = 6
+    elif "2." in ventana: m = 12
+    elif "3." in ventana: m = 24
+    else: return data
+    return data[(data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))]
 
-# 5. MOTOR DE CÁLCULO PONDERADO (A prueba de compatibilidad de Pandas)
-def calc_formal_salario(x):
+df_f = filtrar_ventana(df_f, ventana_sel)
+
+# 5. MOTOR DE CÁLCULO PONDERADO (FEX18)
+def get_weighted_metrics(x):
     w = x['fex18'].sum()
-    if w == 0: return pd.Series([0.0, 0.0], index=['Tasa_Formalidad', 'Salario_Real'])
-    f = (x['formal_num'] * x['fex18']).sum() / w
+    if w == 0: return pd.Series([0,0,0], index=['Formalidad', 'Participacion', 'Salario'])
+    form = (x['formal_num'] * x['fex18']).sum() / w
+    part = (x['part_num'] * x['fex18']).sum() / w
     df_s = x[x['inglabo_real'] > 0]
-    s = (df_s['inglabo_real'] * df_s['fex18']).sum() / df_s['fex18'].sum() if df_s['fex18'].sum() > 0 else 0.0
-    return pd.Series([f, s], index=['Tasa_Formalidad', 'Salario_Real'])
+    sal = (df_s['inglabo_real'] * df_s['fex18']).sum() / df_s['fex18'].sum() if df_s['fex18'].sum() > 0 else 0
+    return pd.Series([form, part, sal], index=['Formalidad', 'Participacion', 'Salario'])
 
-def calc_participacion(x):
-    w = x['fex18'].sum()
-    if w == 0: return pd.Series([0.0], index=['Tasa_Participacion'])
-    p = (x['part_num'] * x['fex18']).sum() / w
-    return pd.Series([p], index=['Tasa_Participacion'])
+# Procesamiento de Series
+if not df_f.empty:
+    ts = df_f.groupby(['fecha', 'young']).apply(get_weighted_metrics).reset_index()
+    for col in ['Formalidad', 'Participacion', 'Salario']:
+        ts[f'{col}_S'] = ts.groupby('young')[col].transform(lambda x: x.rolling(suavizado, min_periods=1).mean())
+        ts[f'{target_col := col}_Diff'] = ts.groupby('young')[col].transform(lambda x: x.diff(12))
+        
+    # Pivot para Brechas DiD
+    def calc_gap(data, metric):
+        pivot = data.pivot(index='fecha', columns='young', values=f'{metric}_S')
+        if 'Hombres 18-24' in pivot.columns and 'Hombres 25-28' in pivot.columns:
+            return (pivot['Hombres 18-24'] - pivot['Hombres 25-28']).reset_index(name='Gap')
+        return pd.DataFrame(columns=['fecha', 'Gap'])
 
-if not df_geo.empty:
-    # Se eliminó include_groups=False para evitar TypeErrors en Streamlit Cloud
-    ts_part = df_geo.groupby(['fecha', 'young']).apply(calc_participacion).reset_index()
-    
-    if not df_f.empty:
-        ts_form = df_f.groupby(['fecha', 'young']).apply(calc_formal_salario).reset_index()
-    else:
-        ts_form = pd.DataFrame(columns=['fecha', 'young', 'Tasa_Formalidad', 'Salario_Real'])
-    
-    ts_data = pd.merge(ts_part, ts_form, on=['fecha', 'young'], how='outer').fillna(0)
-    
-    for target in ['Tasa_Formalidad', 'Tasa_Participacion', 'Salario_Real']:
-        ts_data[f'{target}_S'] = ts_data.groupby('young')[target].transform(lambda x: x.rolling(suavizado, min_periods=1).mean())
-        if target != 'Tasa_Participacion':
-            ts_data[f'{target}_Diff'] = ts_data.groupby('young')[target].transform(lambda x: x.diff(12))
-            
-    pivot_form = ts_data.pivot(index='fecha', columns='young', values='Tasa_Formalidad_S').reset_index()
-    if 'Hombres 18-24' in pivot_form.columns and 'Hombres 25-28' in pivot_form.columns:
-        pivot_form['Brecha (Tratamiento - Control)'] = pivot_form['Hombres 18-24'] - pivot_form['Hombres 25-28']
 else:
-    st.warning("No hay datos para estos filtros.")
+    st.error("Filtros sin datos.")
     st.stop()
 
-# 6. CONFIGURACIÓN VISUAL
-layout_ui = dict(
-    paper_bgcolor='#170a29', plot_bgcolor='#170a29', font=dict(color="#ffffff", size=12),
-    xaxis=dict(showgrid=False, color='#ffffff'), yaxis=dict(showgrid=True, gridcolor='#2a1642', color='#ffffff'),
-    legend=dict(font=dict(color="#ffffff"), orientation="h", y=-0.2, x=0.5, xanchor="center")
-)
+# 6. DASHBOARD PRINCIPAL
+st.title("Impacto Ley 1780: Evaluación de Resultados")
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Población Expandida", f"{int(df_f['fex18'].sum()):,}")
+sal_global = (df_f[df_f['inglabo_real']>0]['inglabo_real'] * df_f[df_f['inglabo_real']>0]['fex18']).sum() / df_f[df_f['inglabo_real']>0]['fex18'].sum()
+k2.metric("Ingreso Laboral Promedio", f"${sal_global:,.0f}")
+k3.metric("Tasa Formalidad", f"{(ts['Formalidad'].mean()*100):.1f}%")
+k4.metric("Participación (PEA)", f"{(ts['Participacion'].mean()*100):.1f}%")
+
+layout_ui = dict(paper_bgcolor='#170a29', plot_bgcolor='#170a29', font=dict(color="#ffffff", size=10),
+                 margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center"),
+                 xaxis=dict(showgrid=False), yaxis=dict(gridcolor='#2a1642'))
 colores = {'Hombres 18-24': '#00e5ff', 'Hombres 25-28': '#b400ff', 'Hombres 29-32': '#ff007f', 'Mujeres': '#39ff14'}
 
-# 7. KPIs SUPERIORES
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Pob. Expandida (Total)", f"{int(df_geo['fex18'].sum()):,}")
-k2.metric("Muestra Filtrada (N)", f"{len(df_geo):,}")
-k3.metric("Formalidad Promedio", f"{ts_data['Tasa_Formalidad'].mean()*100:.1f}%")
-k4.metric("Participación Promedio", f"{ts_data['Tasa_Participacion'].mean()*100:.1f}%")
+def render_row(metric_name, title, is_pct=True):
+    st.markdown(f"### {title}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        fig = px.line(ts, x='fecha', y=f'{metric_name}_S', color='young', color_discrete_map=colores, title="Niveles Suavizados")
+        fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+        fig.update_layout(**layout_ui)
+        if is_pct: fig.update_yaxes(tickformat=".1%")
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        fig = px.line(ts.dropna(), x='fecha', y=f'{metric_name}_Diff', color='young', color_discrete_map=colores, title="Cambios YoY (t vs t-12)")
+        fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+        fig.update_layout(**layout_ui)
+        st.plotly_chart(fig, use_container_width=True)
+    with c3:
+        gap_df = calc_gap(ts, metric_name)
+        fig = px.bar(gap_df, x='fecha', y='Gap', title="Validación DiD (Brecha T - C)", color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
+        fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+        fig.update_layout(**layout_ui, coloraxis_showscale=False)
+        st.plotly_chart(fig, use_container_width=True)
 
-# 8. GRÁFICAS PRINCIPALES
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown("#### 1. Tasa de Formalidad")
-    fig1 = px.line(ts_data, x='fecha', y='Tasa_Formalidad_S', color='young', color_discrete_map=colores)
-    fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig1.update_layout(**layout_ui); fig1.update_yaxes(tickformat=".1%")
-    st.plotly_chart(fig1, use_container_width=True)
+# Renderizado de Filas Objetivo
+render_row('Formalidad', "1. Análisis de Formalidad")
+render_row('Salario', "2. Análisis de Salarios Reales", is_pct=False)
+render_row('Participacion', "3. Análisis de Participación Laboral (PEA)")
 
-with c2:
-    st.markdown("#### 2. Tasa de Participación (PEA)")
-    fig2 = px.line(ts_data, x='fecha', y='Tasa_Participacion_S', color='young', color_discrete_map=colores)
-    fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig2.update_layout(**layout_ui); fig2.update_yaxes(tickformat=".1%", range=[0, 1.0])
-    st.plotly_chart(fig2, use_container_width=True)
-
-c3, c4 = st.columns(2)
-with c3:
-    st.markdown("#### 3. Cambios YoY Formalidad")
-    fig3 = px.line(ts_data.dropna(subset=['Tasa_Formalidad_Diff']), x='fecha', y='Tasa_Formalidad_Diff', color='young', color_discrete_map=colores)
-    fig3.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig3.update_layout(**layout_ui)
-    st.plotly_chart(fig3, use_container_width=True)
-
-with c4:
-    st.markdown("#### 4. Salario Real Promedio")
-    fig4 = px.line(ts_data, x='fecha', y='Salario_Real_S', color='young', color_discrete_map=colores)
-    fig4.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-    fig4.update_layout(**layout_ui); fig4.update_yaxes(tickformat="$,.0f")
-    st.plotly_chart(fig4, use_container_width=True)
-
-# 9. SECCIÓN ECONOMÉTRICA
+# 7. TABLA DE CONTROLES
 st.markdown("---")
-st.markdown("###  Validación: Diferencias en Diferencias (DiD)")
-
-c5, c6 = st.columns([2, 1])
-with c5:
-    st.markdown("#### 5. Brecha de Formalidad (Tratamiento vs Control)")
-    if 'Brecha (Tratamiento - Control)' in pivot_form.columns:
-        fig5 = px.bar(pivot_form, x='fecha', y='Brecha (Tratamiento - Control)', color='Brecha (Tratamiento - Control)', color_continuous_scale=['#ff007f', '#00e5ff'])
-        fig5.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-        fig5.update_layout(**layout_ui, coloraxis_showscale=False); fig5.update_yaxes(tickformat=".1%")
-        st.plotly_chart(fig5, use_container_width=True)
-    else:
-        st.info("Faltan grupos para calcular la brecha.")
-
-with c6:
-    st.markdown("#### Controles Estructurales")
-    df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
-    def get_c(x):
-        w = x['fex18'].sum()
-        if w == 0: return pd.Series([0,0], index=['Escolaridad', 'Edad'])
-        return pd.Series([(x['años_escolaridad']*x['fex18']).sum()/w, (x['edad']*x['fex18']).sum()/w], index=['Escolaridad', 'Edad'])
-    
-    desc = df_geo.groupby(['young', 'Periodo']).apply(get_c).reset_index()
-    desc['Escolaridad'] = desc['Escolaridad'].round(2)
-    desc['Edad'] = desc['Edad'].round(1)
-    
-    try:
-        st.dataframe(desc.sort_values(['young', 'Periodo'], ascending=[True, False]), use_container_width=True, hide_index=True)
-    except:
-        # Fallback por si la versión de Streamlit no soporta hide_index
-        st.dataframe(desc.sort_values(['young', 'Periodo'], ascending=[True, False]), use_container_width=True)
+st.markdown("#### Estadísticas Descriptivas de Controles Ponderados")
+df_f['Periodo'] = np.where(df_f['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
+def get_desc(x):
+    w = x['fex18'].sum()
+    if w == 0: return pd.Series([0,0], index=['Escolaridad', 'Edad'])
+    return pd.Series([(x['años_escolaridad']*x['fex18']).sum()/w, (x['edad']*x['fex18']).sum()/w], index=['Escolaridad', 'Edad'])
+desc = df_f.groupby(['young', 'Periodo']).apply(get_desc).reset_index()
+st.dataframe(desc.sort_values(['young', 'Periodo'], ascending=[True, False]), use_container_width=True, hide_index=True)
