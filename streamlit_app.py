@@ -201,9 +201,6 @@ hipotesis_text = "lo cual sugiere un posible efecto positivo de la política" if
 st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 
 st.markdown(f"""
-Tras la implementación de la Ley 1780, para la población seleccionada, la formalidad laboral {dir_f} en {abs(delta_f):.1f} p.p. 
-Simultáneamente, el ingreso laboral real experimentó un(a) {dir_s} del {abs(delta_s)*100:.1f}%, y la participación en el mercado laboral {dir_p} en {abs(delta_p):.1f} p.p. 
-Estos resultados apuntan a que las dinámicas de empleo formal {"mejoraron" if delta_f > 0 else "empeoraron"}, {hipotesis_text} planteada en la investigación.
 """)
 st.markdown("---")
 
