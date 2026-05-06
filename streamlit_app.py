@@ -237,7 +237,7 @@ def dibujar_fila(metric, label, is_pct=True):
     
     with c1:
         fig = px.line(ts, x='fecha', y=f'{metric}_S', color='young', 
-                      title=f"Nivel de {label}", color_discrete_map=colores)
+                      title=f"  {label}", color_discrete_map=colores)
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
         if is_pct: fig.update_yaxes(tickformat=".1%", range=[0, 1] if metric=="Participacion" else None)
