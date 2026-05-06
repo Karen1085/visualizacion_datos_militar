@@ -4,7 +4,7 @@ import plotly.express as px
 import numpy as np
 
 # 1. CONFIGURACIÓN VISUAL (CYBERPUNK / NEON)
-st.set_page_config(page_title="Tesis Karen - Impacto Ley 1780", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Estadísticas Ley 1780", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -38,10 +38,8 @@ def format_num(num):
 @st.cache_data
 def load_data():
     try:
-        # Aquí reemplaza con tu archivo real
         df = pd.read_parquet("datos_tesis.parquet") 
     except:
-        # Mock data de emergencia basado en tu ejemplo para que el dashboard corra si falla el parquet
         st.warning("No se encontró 'datos_tesis.parquet'. Usando datos de prueba.")
         df = pd.DataFrame()
         st.stop()
@@ -55,6 +53,13 @@ def load_data():
     df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce').fillna(0)
     
+    # Formateo de etiquetas para tamaño del hogar
+    df['tamaño_hogar'] = df['tamaño_hogar'].astype(str).replace({
+        '1': 'Unipersonal', '1.0': 'Unipersonal',
+        '2': '2-3 Personas', '2.0': '2-3 Personas',
+        '3': '4 o más', '3.0': '4 o más'
+    })
+    
     # Normalizar dummies
     df['formal_num'] = np.where(df['formal_ss'].astype(str).str.strip().str.lower() == 'formal', 1.0, 0.0)
     df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
@@ -63,13 +68,13 @@ def load_data():
 df = load_data()
 
 # 3. PANEL LATERAL (FILTROS)
-st.sidebar.markdown("### 🔍 Parámetros de la Tesis")
+st.sidebar.markdown("### Filtros")
 
-# Filtros Demográficos Generales (Aplican a todo)
+# Filtros Demográficos Generales
 clase_opt = sorted(df['clase'].dropna().unique())
 estrato_opt = sorted(df['estrato'].dropna().unique())
 hijos_opt = sorted(df['hijos_05'].dropna().unique())
-tam_hogar_opt = sorted(df['tamaño_hogar'].astype(str).dropna().unique())
+tam_hogar_opt = ["Unipersonal", "2-3 Personas", "4 o más"] # Orden lógico manual
 asiste_opt = sorted(df['asiste_institucioneducativa'].dropna().unique())
 nivel_opt = sorted(df['nivel_educ'].dropna().unique())
 
@@ -85,7 +90,7 @@ with st.sidebar.expander("Más filtros del hogar"):
 
 # Filtro Exclusivo Ocupados
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Filtros de Ocupación** *(Solo afectan Salario y Formalidad)*")
+st.sidebar.markdown("**Filtros de Ocupación** (Afectan Salario y Formalidad)")
 pos_opt = [p for p in df['posicion_ocupacional'].unique() if p != 'No aplica']
 pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=pos_opt)
 
@@ -96,22 +101,22 @@ ventana_sel = st.sidebar.radio("Ventana de Tiempo (Ref: Mayo 2016)",
                                ["1. 6m antes y 6m después", "2. 12m antes y 12m después", "3. 24m antes y 24m después", "4. Todo el periodo"])
 
 suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
-st.sidebar.caption("💡 *Valores mayores suavizan ruido pero esconden cambios bruscos de corto plazo.*")
+st.sidebar.caption("Valores mayores suavizan ruido pero esconden cambios bruscos de corto plazo.")
 
 # 4. PROCESAMIENTO DE DATOS
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# A. Población total para PARTICIPACIÓN y KPIs Generales
+# A. Población total
 df_geo = df[
     (df['clase'].isin(clase_sel)) & 
     (df['estrato'].isin(estrato_sel)) &
     (df['nivel_educ'].isin(nivel_sel)) &
     (df['hijos_05'].isin(hijos_sel)) &
-    (df['tamaño_hogar'].astype(str).isin(tam_hogar_sel)) &
+    (df['tamaño_hogar'].isin(tam_hogar_sel)) &
     (df['asiste_institucioneducativa'].isin(asiste_sel))
 ].copy()
 
-# B. Población específica para FORMALIDAD y SALARIOS (Se le suma el filtro de ocupación)
+# B. Población específica para FORMALIDAD y SALARIOS
 df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
 
 def aplicar_ventana(data, ventana):
@@ -165,7 +170,7 @@ else:
 df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
 df_f['Periodo'] = np.where(df_f['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
 
-def calc_avg_period(data, col_val, is_ocup=False):
+def calc_avg_period(data, col_val):
     if data.empty: return 0, 0
     pre = data[data['Periodo'] == 'Pre-Ley']
     post = data[data['Periodo'] == 'Post-Ley']
@@ -191,13 +196,14 @@ dir_f = "aumentó" if delta_f > 0 else "se redujo"
 dir_s = "incremento" if delta_s > 0 else "caída"
 dir_p = "subió" if delta_p > 0 else "cayó"
 
-# Texto dinámico
 hipotesis_text = "lo cual sugiere un posible efecto positivo de la política" if delta_f > 0 else "lo que invita a cuestionar la efectividad de la política en este subgrupo"
 
-st.title("Impacto Ley 1780: Análisis de Resultados")
+st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 
 st.markdown(f"""
-> **Resumen Ejecutivo:** > Tras la implementación de la Ley 1780, para la población seleccionada, la **formalidad laboral {dir_f} en {abs(delta_f):.1f} p.p.** > Simultáneamente, el ingreso laboral real experimentó un(a) **{dir_s} del {abs(delta_s)*100:.1f}%**, y la participación en el mercado laboral **{dir_p} en {abs(delta_p):.1f} p.p.** > Estos resultados apuntan a que las dinámicas de empleo formal {"mejoraron" if delta_f > 0 else "empeoraron"}, {hipotesis_text} planteada en la tesis.
+Tras la implementación de la Ley 1780, para la población seleccionada, la formalidad laboral {dir_f} en {abs(delta_f):.1f} p.p. 
+Simultáneamente, el ingreso laboral real experimentó un(a) {dir_s} del {abs(delta_s)*100:.1f}%, y la participación en el mercado laboral {dir_p} en {abs(delta_p):.1f} p.p. 
+Estos resultados apuntan a que las dinámicas de empleo formal {"mejoraron" if delta_f > 0 else "empeoraron"}, {hipotesis_text} planteada en la investigación.
 """)
 st.markdown("---")
 
@@ -209,7 +215,7 @@ tot_exp = df_geo['fex_c_x'].sum()
 tot_ocu = (df_geo['ocupados'] * df_geo['fex_c_x']).sum()
 tot_des = (df_geo['desocupados'] * df_geo['fex_c_x']).sum()
 
-c1.metric("Población Total (PEA+PEI)", format_num(tot_exp))
+c1.metric("Población Total", format_num(tot_exp))
 c2.metric("Total Ocupados", format_num(tot_ocu))
 c3.metric("Total Desocupados", format_num(tot_des))
 c4.metric("Formalidad Promedio", f"{f_post*100:.1f}%", delta=f"{delta_f:.1f} p.p. vs pre-ley")
@@ -219,7 +225,8 @@ st.markdown("---")
 
 # 8. GRÁFICOS
 layout_ui = dict(
-    paper_bgcolor='#170a29', plot_bgcolor='#170a29', font=dict(color="#ffffff", size=11),
+    paper_bgcolor='#170a29', plot_bgcolor='#170a29', 
+    font=dict(color="#ffffff", size=11), # Todo el texto de los gráficos en blanco
     xaxis=dict(showgrid=False, color='#ffffff', title="Fecha"), 
     yaxis=dict(gridcolor='#2a1642', color='#ffffff', title="Valor"),
     legend=dict(font=dict(color="#ffffff"), orientation="h", y=-0.25, x=0.5, xanchor="center"),
@@ -232,14 +239,16 @@ def dibujar_fila(metric, label, is_pct=True):
     c1, c2, c3 = st.columns(3)
     
     with c1:
-        fig = px.line(ts, x='fecha', y=f'{metric}_S', color='young', title=f"Nivel {label}", color_discrete_map=colores)
+        fig = px.line(ts, x='fecha', y=f'{metric}_S', color='young', 
+                      title=f"Nivel de {label}", color_discrete_map=colores)
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
         if is_pct: fig.update_yaxes(tickformat=".1%", range=[0, 1] if metric=="Participacion" else None)
         st.plotly_chart(fig, use_container_width=True)
         
     with c2:
-        fig = px.line(ts.dropna(subset=[f'{metric}_Diff']), x='fecha', y=f'{metric}_Diff', color='young', title=f"Cambio YoY {label}", color_discrete_map=colores)
+        fig = px.line(ts.dropna(subset=[f'{metric}_Diff']), x='fecha', y=f'{metric}_Diff', color='young', 
+                      title=f"Cambio YoY de {label}", color_discrete_map=colores)
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
         if is_pct: fig.update_yaxes(tickformat=".1%")
@@ -248,22 +257,34 @@ def dibujar_fila(metric, label, is_pct=True):
     with c3:
         pivot = ts.pivot(index='fecha', columns='young', values=f'{metric}_S')
         if 'Hombres 18-24' in pivot.columns and 'Hombres 25-28' in pivot.columns:
+            # Cálculo exacto del DiD
             pivot['Gap'] = pivot['Hombres 18-24'] - pivot['Hombres 25-28']
-            fig = px.bar(pivot.reset_index(), x='fecha', y='Gap', title="Brecha DiD (Trat vs Cont)", color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
+            gap_pre = pivot.loc[pivot.index < fecha_ley, 'Gap'].mean()
+            gap_post = pivot.loc[pivot.index >= fecha_ley, 'Gap'].mean()
+            did_est = gap_post - gap_pre 
+            
+            did_text = f"{did_est*100:.2f} p.p." if is_pct else f"${did_est:,.0f}"
+            
+            fig = px.bar(pivot.reset_index(), x='fecha', y='Gap', 
+                         title=f"Brecha (Tratamiento - Control)<br><sup>Efecto DiD Promedio: {did_text}</sup>", 
+                         color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
+            
+            # Línea de la Ley
             fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+            
+            # Líneas de los promedios Pre y Post
+            fig.add_shape(type="line", x0=pivot.index.min(), x1=fecha_ley, y0=gap_pre, y1=gap_pre, 
+                          line=dict(color="white", width=2, dash="dot"))
+            fig.add_shape(type="line", x0=fecha_ley, x1=pivot.index.max(), y0=gap_post, y1=gap_post, 
+                          line=dict(color="yellow", width=2, dash="dot"))
+            
             fig.update_layout(**layout_ui, coloraxis_showscale=False)
             if is_pct: fig.update_yaxes(tickformat=".1%")
             st.plotly_chart(fig, use_container_width=True)
             
-    # Guía de lectura debajo de cada bloque
-    st.info(f"""
-    💡 **Cómo leer este bloque de gráficos:**
-    * **Nivel {label}:** Muestra la evolución temporal suavizada. La línea punteada verde marca la entrada en vigor de la Ley 1780.
-    * **Cambio YoY / Brecha:** Representan la diferencia frente al mismo mes del año anterior y la brecha directa entre el grupo tratado y de control. Valores positivos indican que la métrica o la brecha aumentaron tras la política.
-    """)
     st.markdown("<br>", unsafe_allow_html=True)
 
 # Renderizar Filas
-dibujar_fila("Participacion", "Participación en el Mercado Laboral (PEA)")
+dibujar_fila("Participacion", "Participación en el Mercado Laboral")
 dibujar_fila("Formalidad", "Formalidad Laboral")
 dibujar_fila("Salario", "Ingreso Laboral Real", is_pct=False)
