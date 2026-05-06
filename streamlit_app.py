@@ -52,7 +52,7 @@ def load_data():
     for col in ['ocupados', 'desocupados', 'inactivos']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-    df['posicion_ocupacional'] = df['posicion_ocupacional'].fillna('No aplica')
+    df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce').fillna(0)
     
     # Normalizar dummies
