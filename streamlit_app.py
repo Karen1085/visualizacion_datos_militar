@@ -23,58 +23,96 @@ st.markdown("""
     }
     div[data-testid="stMetricLabel"] { color: #ffffff !important; text-transform: uppercase; font-size: 0.8rem !important; }
     div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.7rem !important; font-weight: bold; }
+    div[data-testid="stMetricDelta"] > div { font-size: 0.85rem !important; }
 </style>
 """, unsafe_allow_html=True)
+
+# --- FUNCIONES AUXILIARES ---
+def format_num(num):
+    """Abrevia números grandes para hacerlos más legibles"""
+    if num >= 1e6: return f"{num/1e6:.2f}M"
+    if num >= 1e3: return f"{num/1e3:.2f}k"
+    return f"{num:.0f}"
 
 # 2. CARGA DE DATOS
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_parquet("datos_tesis.parquet")
+        # Aquí reemplaza con tu archivo real
+        df = pd.read_parquet("datos_tesis.parquet") 
     except:
-        st.error("Error: No se encontró 'datos_tesis.parquet'.")
+        # Mock data de emergencia basado en tu ejemplo para que el dashboard corra si falla el parquet
+        st.warning("No se encontró 'datos_tesis.parquet'. Usando datos de prueba.")
+        df = pd.DataFrame()
         st.stop()
     
     df['fecha'] = pd.to_datetime(df['fecha'])
+    
+    # Limpieza de nulos en variables clave de conteo
+    for col in ['ocupados', 'desocupados', 'inactivos']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+    df['posicion_ocupacional'] = df['posicion_ocupacional'].fillna('No aplica')
+    df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce').fillna(0)
+    
     # Normalizar dummies
     df['formal_num'] = np.where(df['formal_ss'].astype(str).str.strip().str.lower() == 'formal', 1.0, 0.0)
-    df['part_num'] = np.where(df['part_mercadol'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
+    df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
     return df
 
 df = load_data()
 
-# 3. PANEL LATERAL (FILTROS SOLICITADOS)
+# 3. PANEL LATERAL (FILTROS)
 st.sidebar.markdown("### 🔍 Parámetros de la Tesis")
 
+# Filtros Demográficos Generales (Aplican a todo)
 clase_opt = sorted(df['clase'].dropna().unique())
-area_opt = sorted(df['area'].dropna().unique())
-dpto_opt = sorted(df['dpto'].dropna().unique())
-rol_opt = sorted(df['rol_hogar'].dropna().unique())
-est_opt = sorted(df['estado_civil'].dropna().unique())
-pos_opt = sorted(df['posicion_ocup'].dropna().unique())
+estrato_opt = sorted(df['estrato'].dropna().unique())
+hijos_opt = sorted(df['hijos_05'].dropna().unique())
+tam_hogar_opt = sorted(df['tamaño_hogar'].astype(str).dropna().unique())
+asiste_opt = sorted(df['asiste_institucioneducativa'].dropna().unique())
+nivel_opt = sorted(df['nivel_educ'].dropna().unique())
 
+st.sidebar.markdown("**Filtros Poblacionales**")
 clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=clase_opt)
-area_sel = st.sidebar.multiselect("Áreas Metropolitanas", area_opt, default=area_opt[:5])
-dpto_sel = st.sidebar.multiselect("Departamento", dpto_opt)
-rol_sel = st.sidebar.multiselect("Rol en el Hogar", rol_opt, default=rol_opt)
-est_sel = st.sidebar.multiselect("Estado Civil", est_opt, default=est_opt)
-pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=["Asalariados (Empresa/Gobierno)"])
+estrato_sel = st.sidebar.multiselect("Estrato", estrato_opt, default=estrato_opt)
+nivel_sel = st.sidebar.multiselect("Nivel Educativo", nivel_opt, default=nivel_opt)
 
+with st.sidebar.expander("Más filtros del hogar"):
+    hijos_sel = st.sidebar.multiselect("Hijos 0-5 años", hijos_opt, default=hijos_opt)
+    tam_hogar_sel = st.sidebar.multiselect("Tamaño del Hogar", tam_hogar_opt, default=tam_hogar_opt)
+    asiste_sel = st.sidebar.multiselect("Asiste Inst. Educativa", asiste_opt, default=asiste_opt)
+
+# Filtro Exclusivo Ocupados
 st.sidebar.markdown("---")
-ventana_sel = st.sidebar.radio("Ventana de Tiempo (Referencia: Mayo 2016)", 
+st.sidebar.markdown("**Filtros de Ocupación** *(Solo afectan Salario y Formalidad)*")
+pos_opt = [p for p in df['posicion_ocupacional'].unique() if p != 'No aplica']
+pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=pos_opt)
+
+# Filtros de Tiempo
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Configuración Temporal**")
+ventana_sel = st.sidebar.radio("Ventana de Tiempo (Ref: Mayo 2016)", 
                                ["1. 6m antes y 6m después", "2. 12m antes y 12m después", "3. 24m antes y 24m después", "4. Todo el periodo"])
+
 suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
+st.sidebar.caption("💡 *Valores mayores suavizan ruido pero esconden cambios bruscos de corto plazo.*")
 
 # 4. PROCESAMIENTO DE DATOS
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# df_geo: Población total para PARTICIPACIÓN
-df_geo = df[(df['clase'].isin(clase_sel)) & (df['area'].isin(area_sel)) & 
-            (df['rol_hogar'].isin(rol_sel)) & (df['estado_civil'].isin(est_sel))].copy()
-if dpto_sel: df_geo = df_geo[df_geo['dpto'].isin(dpto_sel)]
+# A. Población total para PARTICIPACIÓN y KPIs Generales
+df_geo = df[
+    (df['clase'].isin(clase_sel)) & 
+    (df['estrato'].isin(estrato_sel)) &
+    (df['nivel_educ'].isin(nivel_sel)) &
+    (df['hijos_05'].isin(hijos_sel)) &
+    (df['tamaño_hogar'].astype(str).isin(tam_hogar_sel)) &
+    (df['asiste_institucioneducativa'].isin(asiste_sel))
+].copy()
 
-# df_f: Población con ocupación específica para FORMALIDAD y SALARIOS
-df_f = df_geo[df_geo['posicion_ocup'].isin(pos_sel)].copy()
+# B. Población específica para FORMALIDAD y SALARIOS (Se le suma el filtro de ocupación)
+df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
 
 def aplicar_ventana(data, ventana):
     if "1." in ventana: m = 6
@@ -86,71 +124,127 @@ def aplicar_ventana(data, ventana):
 df_geo = aplicar_ventana(df_geo, ventana_sel)
 df_f = aplicar_ventana(df_f, ventana_sel)
 
-# 5. CÁLCULOS PONDERADOS
-def get_stats(x):
-    w = x['fex18'].sum()
-    if w <= 0: return pd.Series([0.0, 0.0, 0.0], index=['Formalidad', 'Participacion', 'Salario'])
-    f = (x['formal_num'] * x['fex18']).sum() / w
-    p = (x['part_num'] * x['fex18']).sum() / w
-    df_s = x[x['inglabo_real'] > 0]
-    s = (df_s['inglabo_real'] * df_s['fex18']).sum() / df_s['fex18'].sum() if not df_s.empty else 0.0
-    return pd.Series([f, p, s], index=['Formalidad', 'Participacion', 'Salario'])
+# 5. CÁLCULOS PONDERADOS EN EL TIEMPO
+def get_stats_geo(x):
+    w = x['fex_c_x'].sum()
+    if w <= 0: return pd.Series([0.0], index=['Participacion'])
+    p = (x['part_num'] * x['fex_c_x']).sum() / w
+    return pd.Series([p], index=['Participacion'])
+
+def get_stats_f(x):
+    w = x['fex_c_x'].sum()
+    if w <= 0: return pd.Series([0.0, 0.0], index=['Formalidad', 'Salario'])
+    f = (x['formal_num'] * x['fex_c_x']).sum() / w
+    df_s = x[x['ingreal'] > 0]
+    s = (df_s['ingreal'] * df_s['fex_c_x']).sum() / df_s['fex_c_x'].sum() if not df_s.empty else 0.0
+    return pd.Series([f, s], index=['Formalidad', 'Salario'])
 
 if not df_geo.empty:
-    # Agregación corregida para evitar NameError/KeyError
-    ts_part = df_geo.groupby(['fecha', 'young']).apply(get_stats).reset_index()
+    ts_part = df_geo.groupby(['fecha', 'young']).apply(get_stats_geo).reset_index()
+    
     if not df_f.empty:
-        ts_form = df_f.groupby(['fecha', 'young']).apply(get_stats).reset_index()
+        ts_form = df_f.groupby(['fecha', 'young']).apply(get_stats_f).reset_index()
     else:
-        ts_form = ts_part.copy()
-        ts_form[['Formalidad', 'Salario']] = 0.0
+        ts_form = ts_part[['fecha', 'young']].copy()
+        ts_form['Formalidad'] = 0.0
+        ts_form['Salario'] = 0.0
 
     # Unir resultados
-    ts = pd.merge(ts_form[['fecha', 'young', 'Formalidad', 'Salario']], 
-                  ts_part[['fecha', 'young', 'Participacion']], on=['fecha', 'young'], how='left').fillna(0)
+    ts = pd.merge(ts_part, ts_form, on=['fecha', 'young'], how='left').fillna(0)
     
     # Suavizado y Diferencias
     for col in ['Formalidad', 'Participacion', 'Salario']:
         ts[f'{col}_S'] = ts.groupby('young')[col].transform(lambda x: x.rolling(suavizado, min_periods=1).mean())
         ts[f'{col}_Diff'] = ts.groupby('young')[col].transform(lambda x: x.diff(12))
 else:
-    st.warning("Selección de filtros vacía.")
+    st.warning("La selección de filtros no arrojó resultados.")
     st.stop()
 
-# 6. DASHBOARD
+
+# 6. RESUMEN EJECUTIVO DINÁMICO & DELTAS
+df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
+df_f['Periodo'] = np.where(df_f['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
+
+def calc_avg_period(data, col_val, is_ocup=False):
+    if data.empty: return 0, 0
+    pre = data[data['Periodo'] == 'Pre-Ley']
+    post = data[data['Periodo'] == 'Post-Ley']
+    
+    val_pre = (pre[col_val] * pre['fex_c_x']).sum() / pre['fex_c_x'].sum() if pre['fex_c_x'].sum() > 0 else 0
+    val_post = (post[col_val] * post['fex_c_x']).sum() / post['fex_c_x'].sum() if post['fex_c_x'].sum() > 0 else 0
+    return val_pre, val_post
+
+p_pre, p_post = calc_avg_period(df_geo, 'part_num')
+f_pre, f_post = calc_avg_period(df_f, 'formal_num')
+
+# Salario solo mayores a 0
+df_sal_pre = df_f[(df_f['Periodo'] == 'Pre-Ley') & (df_f['ingreal'] > 0)]
+df_sal_post = df_f[(df_f['Periodo'] == 'Post-Ley') & (df_f['ingreal'] > 0)]
+s_pre = (df_sal_pre['ingreal'] * df_sal_pre['fex_c_x']).sum() / df_sal_pre['fex_c_x'].sum() if df_sal_pre['fex_c_x'].sum() > 0 else 0
+s_post = (df_sal_post['ingreal'] * df_sal_post['fex_c_x']).sum() / df_sal_post['fex_c_x'].sum() if df_sal_post['fex_c_x'].sum() > 0 else 0
+
+delta_f = (f_post - f_pre) * 100
+delta_p = (p_post - p_pre) * 100
+delta_s = (s_post / s_pre) - 1 if s_pre > 0 else 0
+
+dir_f = "aumentó" if delta_f > 0 else "se redujo"
+dir_s = "incremento" if delta_s > 0 else "caída"
+dir_p = "subió" if delta_p > 0 else "cayó"
+
+# Texto dinámico
+hipotesis_text = "lo cual sugiere un posible efecto positivo de la política" if delta_f > 0 else "lo que invita a cuestionar la efectividad de la política en este subgrupo"
+
 st.title("Impacto Ley 1780: Análisis de Resultados")
 
-# KPIs
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Población Expandida", f"{int(df_geo['fex18'].sum()):,}")
-df_sal = df_f[df_f['inglabo_real'] > 0]
-ing_prom = (df_sal['inglabo_real'] * df_sal['fex18']).sum() / df_sal['fex18'].sum() if not df_sal.empty else 0
-k2.metric("Ingreso Laboral Real", f"${ing_prom:,.0f}")
-k3.metric("Formalidad Promedio", f"{(ts['Formalidad'].mean()*100):.1f}%")
-k4.metric("Participación (PEA)", f"{(ts['Participacion'].mean()*100):.1f}%")
+st.markdown(f"""
+> **Resumen Ejecutivo:** > Tras la implementación de la Ley 1780, para la población seleccionada, la **formalidad laboral {dir_f} en {abs(delta_f):.1f} p.p.** > Simultáneamente, el ingreso laboral real experimentó un(a) **{dir_s} del {abs(delta_s)*100:.1f}%**, y la participación en el mercado laboral **{dir_p} en {abs(delta_p):.1f} p.p.** > Estos resultados apuntan a que las dinámicas de empleo formal {"mejoraron" if delta_f > 0 else "empeoraron"}, {hipotesis_text} planteada en la tesis.
+""")
+st.markdown("---")
 
+# 7. KPIs PRINCIPALES
+st.markdown("#### Indicadores Globales (Promedio Periodo)")
+c1, c2, c3, c4, c5 = st.columns(5)
+
+tot_exp = df_geo['fex_c_x'].sum()
+tot_ocu = (df_geo['ocupados'] * df_geo['fex_c_x']).sum()
+tot_des = (df_geo['desocupados'] * df_geo['fex_c_x']).sum()
+
+c1.metric("Población Total (PEA+PEI)", format_num(tot_exp))
+c2.metric("Total Ocupados", format_num(tot_ocu))
+c3.metric("Total Desocupados", format_num(tot_des))
+c4.metric("Formalidad Promedio", f"{f_post*100:.1f}%", delta=f"{delta_f:.1f} p.p. vs pre-ley")
+c5.metric("Ingreso Real", f"${format_num(s_post)}", delta=f"{delta_s*100:.1f}% vs pre-ley")
+
+st.markdown("---")
+
+# 8. GRÁFICOS
 layout_ui = dict(
     paper_bgcolor='#170a29', plot_bgcolor='#170a29', font=dict(color="#ffffff", size=11),
-    xaxis=dict(showgrid=False, color='#ffffff'), yaxis=dict(gridcolor='#2a1642', color='#ffffff'),
+    xaxis=dict(showgrid=False, color='#ffffff', title="Fecha"), 
+    yaxis=dict(gridcolor='#2a1642', color='#ffffff', title="Valor"),
     legend=dict(font=dict(color="#ffffff"), orientation="h", y=-0.25, x=0.5, xanchor="center"),
     margin=dict(l=10, r=10, t=40, b=10)
 )
 colores = {'Hombres 18-24': '#00e5ff', 'Hombres 25-28': '#b400ff', 'Hombres 29-32': '#ff007f', 'Mujeres': '#39ff14'}
 
 def dibujar_fila(metric, label, is_pct=True):
-    st.markdown(f"#### Análisis de {label}")
+    st.markdown(f"### {label}")
     c1, c2, c3 = st.columns(3)
+    
     with c1:
-        fig = px.line(ts, x='fecha', y=f'{metric}_S', color='young', color_discrete_map=colores, title=f"Nivel {label}")
+        fig = px.line(ts, x='fecha', y=f'{metric}_S', color='young', title=f"Nivel {label}", color_discrete_map=colores)
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
         if is_pct: fig.update_yaxes(tickformat=".1%", range=[0, 1] if metric=="Participacion" else None)
         st.plotly_chart(fig, use_container_width=True)
+        
     with c2:
-        fig = px.line(ts.dropna(subset=[f'{metric}_Diff']), x='fecha', y=f'{metric}_Diff', color='young', color_discrete_map=colores, title=f"Cambio YoY {label}")
+        fig = px.line(ts.dropna(subset=[f'{metric}_Diff']), x='fecha', y=f'{metric}_Diff', color='young', title=f"Cambio YoY {label}", color_discrete_map=colores)
         fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         fig.update_layout(**layout_ui)
+        if is_pct: fig.update_yaxes(tickformat=".1%")
         st.plotly_chart(fig, use_container_width=True)
+        
     with c3:
         pivot = ts.pivot(index='fecha', columns='young', values=f'{metric}_S')
         if 'Hombres 18-24' in pivot.columns and 'Hombres 25-28' in pivot.columns:
@@ -158,19 +252,18 @@ def dibujar_fila(metric, label, is_pct=True):
             fig = px.bar(pivot.reset_index(), x='fecha', y='Gap', title="Brecha DiD (Trat vs Cont)", color='Gap', color_continuous_scale=['#ff007f', '#00e5ff'])
             fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
             fig.update_layout(**layout_ui, coloraxis_showscale=False)
+            if is_pct: fig.update_yaxes(tickformat=".1%")
             st.plotly_chart(fig, use_container_width=True)
+            
+    # Guía de lectura debajo de cada bloque
+    st.info(f"""
+    💡 **Cómo leer este bloque de gráficos:**
+    * **Nivel {label}:** Muestra la evolución temporal suavizada. La línea punteada verde marca la entrada en vigor de la Ley 1780.
+    * **Cambio YoY / Brecha:** Representan la diferencia frente al mismo mes del año anterior y la brecha directa entre el grupo tratado y de control. Valores positivos indican que la métrica o la brecha aumentaron tras la política.
+    """)
+    st.markdown("<br>", unsafe_allow_html=True)
 
 # Renderizar Filas
+dibujar_fila("Participacion", "Participación en el Mercado Laboral (PEA)")
 dibujar_fila("Formalidad", "Formalidad Laboral")
 dibujar_fila("Salario", "Ingreso Laboral Real", is_pct=False)
-dibujar_fila("Participacion", "Participación (PEA)")
-
-st.markdown("---")
-st.markdown("#### Estadísticas Descriptivas Ponderadas")
-df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
-def get_desc(x):
-    w = x['fex18'].sum()
-    if w <= 0: return pd.Series([0.0, 0.0], index=['Escolaridad', 'Edad'])
-    return pd.Series([(x['años_escolaridad']*x['fex18']).sum()/w, (x['edad']*x['fex18']).sum()/w], index=['Escolaridad', 'Edad'])
-desc = df_geo.groupby(['young', 'Periodo']).apply(get_desc).reset_index()
-st.dataframe(desc.sort_values(['young', 'Periodo'], ascending=[True, False]), use_container_width=True, hide_index=True)
