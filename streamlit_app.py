@@ -27,10 +27,10 @@ st.markdown("""
     div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.7rem !important; font-weight: bold; }
     div[data-testid="stMetricDelta"] > div { font-size: 0.85rem !important; }
     
-    /* Estilos para la Tabla DiD */
-    .did-table { width: 100%; border-collapse: collapse; text-align: center; color: white; font-size: 0.95rem; margin-top: 10px; }
-    .did-table th { background-color: #2a1642; padding: 12px; border-bottom: 3px solid #b400ff; font-weight: bold; }
-    .did-table td { padding: 10px; border-bottom: 1px solid #3d2063; }
+    /* Estilos ajustados para la Tabla DiD (más compacta) */
+    .did-table { width: 100%; border-collapse: collapse; text-align: center; color: white; font-size: 0.85rem; margin-top: 5px; }
+    .did-table th { background-color: #2a1642; padding: 8px; border-bottom: 3px solid #b400ff; font-weight: bold; }
+    .did-table td { padding: 8px; border-bottom: 1px solid #3d2063; }
     .did-table tr:hover { background-color: #1a0d2b; }
     .did-table .highlight { color: #00e5ff; font-weight: bold; }
     .did-table .base { color: #888888; font-style: italic; }
@@ -39,7 +39,6 @@ st.markdown("""
 
 # --- FUNCIONES AUXILIARES ---
 def format_num(num):
-    """Abrevia números grandes para hacerlos más legibles"""
     if num >= 1e6: return f"{num/1e6:.2f}M"
     if num >= 1e3: return f"{num/1e3:.2f}k"
     return f"{num:.0f}"
@@ -56,26 +55,22 @@ def load_data():
     
     df['fecha'] = pd.to_datetime(df['fecha'])
     
-    # Limpieza de nulos en variables clave de conteo
     for col in ['ocupados', 'desocupados', 'inactivos']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
     df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
     
-    # Formateo de etiquetas para tamaño del hogar
     df['tamaño_hogar'] = df['tamaño_hogar'].astype(str).replace({
         '1': 'Unipersonal', '1.0': 'Unipersonal',
         '2': '2-3 Personas', '2.0': '2-3 Personas',
         '3': '4 o más', '3.0': '4 o más'
     })
     
-    # MANEJO DE NULOS (Estilo Stata)
+    # Manejo tipo Stata
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
-    
     condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
     df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
                                 np.where(condicion_formal.isin(['', 'nan', 'none', 'null']), np.nan, 0.0))
-    
     df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
     
     return df
@@ -117,7 +112,6 @@ suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
 # 4. PROCESAMIENTO DE DATOS MACRO
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# Población total (Participación)
 df_geo = df[
     (df['clase'].isin(clase_sel)) & 
     (df['estrato'].isin(estrato_sel)) &
@@ -127,7 +121,6 @@ df_geo = df[
     (df['asiste_institucioneducativa'].isin(asiste_sel))
 ].copy()
 
-# Población específica (Formalidad y Salarios)
 df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
 
 def aplicar_ventana(data, ventana):
@@ -140,7 +133,6 @@ def aplicar_ventana(data, ventana):
 df_geo = aplicar_ventana(df_geo, ventana_sel)
 df_f = aplicar_ventana(df_f, ventana_sel)
 
-# Segmentación Pre y Post para tablas
 df_geo['Periodo'] = np.where(df_geo['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
 df_f['Periodo'] = np.where(df_f['fecha'] < fecha_ley, 'Pre-Ley', 'Post-Ley')
 
@@ -203,20 +195,17 @@ def calc_did_table(metric, is_pct=True):
         data = df_f.dropna(subset=['ingreal']).copy()
         val_col = 'ingreal'
 
-    # Calcular promedios ponderados por grupo y periodo
     def w_mean(grp):
         return (grp[val_col] * grp['fex']).sum() / grp['fex'].sum() if grp['fex'].sum() > 0 else np.nan
 
     if data.empty: return {}
     agg = data.groupby(['young', 'Periodo']).apply(w_mean).unstack()
     
-    # Asegurar que existan ambas columnas
     for p in ['Pre-Ley', 'Post-Ley']:
         if p not in agg.columns: agg[p] = np.nan
         
     agg['Var'] = agg['Post-Ley'] - agg['Pre-Ley']
     
-    # Extraer valores seguros
     def get_val(grupo, col): return agg.loc[grupo, col] if grupo in agg.index else np.nan
     
     ctrl_var = get_val('Hombres 29-32', 'Var')
@@ -242,7 +231,6 @@ def calc_did_table(metric, is_pct=True):
         post = get_val(f['grupo'], 'Post-Ley')
         var = get_val(f['grupo'], 'Var')
         
-        # Formateo
         if is_pct:
             pre_str = f"{pre*100:.1f}" if pd.notnull(pre) else "--"
             post_str = f"{post*100:.1f}" if pd.notnull(post) else "--"
@@ -252,7 +240,7 @@ def calc_did_table(metric, is_pct=True):
             else:
                 did = (var - ctrl_var) * 100 if pd.notnull(var) and pd.notnull(ctrl_var) else np.nan
                 did_str = f"<span class='highlight'>{did:+.2f}</span>" if pd.notnull(did) else "--"
-        else: # Para Salarios
+        else:
             pre_str = f"${pre:,.0f}" if pd.notnull(pre) else "--"
             post_str = f"${post:,.0f}" if pd.notnull(post) else "--"
             var_str = f"{var:+.0f}" if pd.notnull(var) else "--"
@@ -271,48 +259,70 @@ def calc_did_table(metric, is_pct=True):
 layout_ui = dict(
     paper_bgcolor='#170a29', plot_bgcolor='#170a29', 
     font=dict(color="#ffffff", size=11),
-    legend=dict(font=dict(color="#ffffff"), orientation="h", y=-0.15, x=0.5, xanchor="center"),
-    margin=dict(l=10, r=10, t=40, b=10)
+    legend=dict(font=dict(color="#ffffff"), orientation="h", y=-0.2, x=0.5, xanchor="center"),
+    margin=dict(l=10, r=10, t=30, b=10)
 )
 
 def dibujar_fila(metric, label, is_pct=True):
     st.markdown(f"### {label}")
-    c1, c2 = st.columns([5, 4]) # 50% Gráfico / 40% Tabla
+    
+    # Extraer series por grupo
+    ts_1824 = ts[ts['young'] == 'Hombres 18-24'].dropna(subset=[f'{metric}_S'])
+    ts_2528 = ts[ts['young'] == 'Hombres 25-28'].dropna(subset=[f'{metric}_S'])
+    ts_2932 = ts[ts['young'] == 'Hombres 29-32'].dropna(subset=[f'{metric}_S'])
+    
+    # CALCULAR ESCALA GLOBAL PARA QUE AMBAS GRÁFICAS TENGAN EL MISMO EJE Y
+    all_vals = pd.concat([ts_1824[f'{metric}_S'], ts_2528[f'{metric}_S'], ts_2932[f'{metric}_S']])
+    if not all_vals.empty:
+        y_min, y_max = all_vals.min(), all_vals.max()
+        margen = (y_max - y_min) * 0.1
+        if margen == 0: margen = y_max * 0.1 if y_max != 0 else 0.1
+        rango = [y_min - margen, y_max + margen]
+    else:
+        rango = [0, 1] if is_pct else None
+        
+    formato = ".1%" if is_pct else None
+
+    # Distribución en 3 columnas: Gráfico 1 (35%) | Gráfico 2 (35%) | Tabla (30%)
+    c1, c2, c3 = st.columns([3.5, 3.5, 3]) 
     
     with c1:
-        # Gráfica de Doble Eje (Tratamiento vs Control)
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        ts_1824 = ts[ts['young'] == 'Hombres 18-24'].dropna(subset=[f'{metric}_S'])
-        ts_2932 = ts[ts['young'] == 'Hombres 29-32'].dropna(subset=[f'{metric}_S'])
+        fig1 = make_subplots(specs=[[{"secondary_y": True}]])
+        fig1.add_trace(go.Scatter(x=ts_1824['fecha'], y=ts_1824[f'{metric}_S'], 
+                                 name='Trat. 18-24', line=dict(color='#00e5ff', width=2)), secondary_y=False)
+        fig1.add_trace(go.Scatter(x=ts_2932['fecha'], y=ts_2932[f'{metric}_S'], 
+                                 name='Control 29-32', line=dict(color='#ff007f', width=2)), secondary_y=True)
         
-        # Añadir líneas
-        fig.add_trace(go.Scatter(x=ts_1824['fecha'], y=ts_1824[f'{metric}_S'], 
-                                 name='Trat. 18-24 (Eje Izq)', line=dict(color='#00e5ff', width=2)), secondary_y=False)
-        fig.add_trace(go.Scatter(x=ts_2932['fecha'], y=ts_2932[f'{metric}_S'], 
-                                 name='Control 29-32 (Eje Der)', line=dict(color='#ff007f', width=2)), secondary_y=True)
+        fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        fig.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
-        
-        # Sincronizar la escala de los dos ejes
-        all_vals = pd.concat([ts_1824[f'{metric}_S'], ts_2932[f'{metric}_S']])
-        if not all_vals.empty:
-            y_min, y_max = all_vals.min(), all_vals.max()
-            margen = (y_max - y_min) * 0.1
-            rango = [y_min - margen, y_max + margen]
-            
-            formato = ".1%" if is_pct else None
-            fig.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False, title="18-24 años")
-            fig.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False, title="29-32 años")
-            
-        fig.update_xaxes(showgrid=False)
-        fig.update_layout(**layout_ui, title=f"Evolución: Tratamiento vs Control")
-        st.plotly_chart(fig, use_container_width=True)
+        # Aplicar la escala global calculada a ambos ejes
+        fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
+        fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
+        fig1.update_xaxes(showgrid=False)
+        fig1.update_layout(**layout_ui, title="18-24 años vs Control")
+        st.plotly_chart(fig1, use_container_width=True)
         
     with c2:
-        st.markdown("<br>", unsafe_allow_html=True) # Espacio para alinear
+        fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+        fig2.add_trace(go.Scatter(x=ts_2528['fecha'], y=ts_2528[f'{metric}_S'], 
+                                 name='Trat. 25-28', line=dict(color='#b400ff', width=2)), secondary_y=False)
+        fig2.add_trace(go.Scatter(x=ts_2932['fecha'], y=ts_2932[f'{metric}_S'], 
+                                 name='Control 29-32', line=dict(color='#ff007f', width=2)), secondary_y=True)
+        
+        fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
+        
+        # Aplicar la MISMA escala global a la segunda gráfica
+        fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
+        fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
+        fig2.update_xaxes(showgrid=False)
+        fig2.update_layout(**layout_ui, title="25-28 años vs Control")
+        st.plotly_chart(fig2, use_container_width=True)
+        
+    with c3:
+        st.markdown("<br>", unsafe_allow_html=True) 
         tabla_html = calc_did_table(metric, is_pct)
         st.markdown(tabla_html, unsafe_allow_html=True)
-            
+        
     st.markdown("---")
 
 # Renderizar las 3 métricas
