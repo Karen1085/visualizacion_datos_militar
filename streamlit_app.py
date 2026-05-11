@@ -66,11 +66,14 @@ def load_data():
         '3': '4 o más', '3.0': '4 o más'
     })
     
-    # Manejo tipo Stata
+    # --- CORRECCIÓN: MANEJO DE NULOS ESTRICTO TIPO STATA ---
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
+    
+    # Solo 1.0 para formal, 0.0 para informal. TODO LO DEMÁS ES NaN.
     condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
     df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
-                                np.where(condicion_formal.isin(['', 'nan', 'none', 'null']), np.nan, 0.0))
+                                np.where(condicion_formal == 'informal', 0.0, np.nan))
+                                
     df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
     
     return df
@@ -266,12 +269,11 @@ layout_ui = dict(
 def dibujar_fila(metric, label, is_pct=True):
     st.markdown(f"### {label}")
     
-    # Extraer series por grupo
     ts_1824 = ts[ts['young'] == 'Hombres 18-24'].dropna(subset=[f'{metric}_S'])
     ts_2528 = ts[ts['young'] == 'Hombres 25-28'].dropna(subset=[f'{metric}_S'])
     ts_2932 = ts[ts['young'] == 'Hombres 29-32'].dropna(subset=[f'{metric}_S'])
     
-    # CALCULAR ESCALA GLOBAL PARA QUE AMBAS GRÁFICAS TENGAN EL MISMO EJE Y
+    # Escala global unificada
     all_vals = pd.concat([ts_1824[f'{metric}_S'], ts_2528[f'{metric}_S'], ts_2932[f'{metric}_S']])
     if not all_vals.empty:
         y_min, y_max = all_vals.min(), all_vals.max()
@@ -283,7 +285,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
     formato = ".1%" if is_pct else None
 
-    # Distribución en 3 columnas: Gráfico 1 (35%) | Gráfico 2 (35%) | Tabla (30%)
     c1, c2, c3 = st.columns([3.5, 3.5, 3]) 
     
     with c1:
@@ -295,7 +296,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        # Aplicar la escala global calculada a ambos ejes
         fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig1.update_xaxes(showgrid=False)
@@ -311,7 +311,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        # Aplicar la MISMA escala global a la segunda gráfica
         fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig2.update_xaxes(showgrid=False)
