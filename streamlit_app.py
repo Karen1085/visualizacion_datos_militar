@@ -25,7 +25,6 @@ st.markdown("""
     }
     div[data-testid="stMetricLabel"] { color: #ffffff !important; text-transform: uppercase; font-size: 0.8rem !important; }
     div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.7rem !important; font-weight: bold; }
-    div[data-testid="stMetricDelta"] > div { font-size: 0.85rem !important; }
     
     /* Estilos ajustados para la Tabla DiD (más compacta) */
     .did-table { width: 100%; border-collapse: collapse; text-align: center; color: white; font-size: 0.85rem; margin-top: 5px; }
@@ -66,7 +65,7 @@ def load_data():
         '3': '4 o más', '3.0': '4 o más'
     })
     
-    # --- CORRECCIÓN: MANEJO DE NULOS ESTRICTO TIPO STATA ---
+    # --- MANEJO DE NULOS ESTRICTO TIPO STATA ---
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
     
     # Solo 1.0 para formal, 0.0 para informal. TODO LO DEMÁS ES NaN.
@@ -173,18 +172,29 @@ else:
     st.stop()
 
 
-# 6. HEADER Y KPIs
+# 6. HEADER Y KPIs PROMEDIOS GLOBALES
 st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 st.markdown("---")
 
+st.markdown("#### Promedios del Periodo Seleccionado")
 c1, c2, c3 = st.columns(3)
-tot_exp = df_geo['fex'].sum()
-tot_ocu = (df_geo['ocupados'] * df_geo['fex']).sum()
-tot_des = (df_geo['desocupados'] * df_geo['fex']).sum()
-c1.metric("Población Total Expandida", format_num(tot_exp))
-c2.metric("Total Ocupados", format_num(tot_ocu))
-c3.metric("Total Desocupados", format_num(tot_des))
+
+# Cálculos de promedios para todo el periodo seleccionado
+df_part_kpi = df_geo.dropna(subset=['part_num'])
+part_prom = (df_part_kpi['part_num'] * df_part_kpi['fex']).sum() / df_part_kpi['fex'].sum() if df_part_kpi['fex'].sum() > 0 else 0
+
+df_form_kpi = df_f.dropna(subset=['formal_num'])
+form_prom = (df_form_kpi['formal_num'] * df_form_kpi['fex']).sum() / df_form_kpi['fex'].sum() if df_form_kpi['fex'].sum() > 0 else 0
+
+df_sal_kpi = df_f.dropna(subset=['ingreal'])
+sal_prom = (df_sal_kpi['ingreal'] * df_sal_kpi['fex']).sum() / df_sal_kpi['fex'].sum() if df_sal_kpi['fex'].sum() > 0 else 0
+
+c1.metric("Participación Promedio", f"{part_prom*100:.1f}%")
+c2.metric("Formalidad Promedio", f"{form_prom*100:.1f}%")
+c3.metric("Salario Real Promedio", f"${format_num(sal_prom)}")
+
 st.markdown("---")
+
 
 # 7. FUNCIÓN GENERADORA DE TABLAS DiD
 def calc_did_table(metric, is_pct=True):
@@ -296,8 +306,9 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
-        fig1.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
+        # Actualizando los ejes Y con Títulos
+        fig1.update_yaxes(title_text="Tratamiento 18-24", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
+        fig1.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig1.update_xaxes(showgrid=False)
         fig1.update_layout(**layout_ui, title="18-24 años vs Control")
         st.plotly_chart(fig1, use_container_width=True)
@@ -311,8 +322,9 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=False, showgrid=False)
-        fig2.update_yaxes(range=rango, tickformat=formato, secondary_y=True, showgrid=False)
+        # Actualizando los ejes Y con Títulos
+        fig2.update_yaxes(title_text="Tratamiento 25-28", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
+        fig2.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig2.update_xaxes(showgrid=False)
         fig2.update_layout(**layout_ui, title="25-28 años vs Control")
         st.plotly_chart(fig2, use_container_width=True)
