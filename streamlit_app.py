@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import numpy as np 
+import numpy as np
 
 # 1. CONFIGURACIÓN VISUAL (CYBERPUNK / NEON)
 st.set_page_config(page_title="Estadísticas Ley 1780", layout="wide", initial_sidebar_state="expanded")
@@ -26,7 +26,7 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { color: #ffffff !important; text-transform: uppercase; font-size: 0.8rem !important; }
     div[data-testid="stMetricValue"] > div { color: #00e5ff !important; font-size: 1.7rem !important; font-weight: bold; }
     
-    /* Estilos ajustados para la Tabla DiD (más compacta) */
+    /* Estilos ajustados para la Tabla DiD */
     .did-table { width: 100%; border-collapse: collapse; text-align: center; color: white; font-size: 0.85rem; margin-top: 5px; }
     .did-table th { background-color: #2a1642; padding: 8px; border-bottom: 3px solid #b400ff; font-weight: bold; }
     .did-table td { padding: 8px; border-bottom: 1px solid #3d2063; }
@@ -42,21 +42,32 @@ def format_num(num):
     if num >= 1e3: return f"{num/1e3:.2f}k"
     return f"{num:.0f}"
 
-# 2. CARGA DE DATOS (Renombrada a v2 para ROMPER LA CACHÉ a la fuerza)
-@st.cache_data(ttl=3600, show_spinner="Descargando datos actualizados desde GitHub...")
-def load_data_v2():
+# 2. CARGA DE DATOS (v5 - Limpieza extrema de nombres)
+@st.cache_data(ttl=3600, show_spinner="Descargando y limpiando datos...")
+def load_data_v5():
     try:
         url = "https://github.com/Karen1085/visualizacion_datos_militar/raw/main/datos_tesis.parquet"
         df = pd.read_parquet(url) 
-    except:
-        st.warning("No se encontró 'datos_tesis.parquet'. Usando datos de prueba.")
-        df = pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error descargando el archivo Parquet: {e}")
+        st.stop()
+        
+    # LIMPIEZA DE COLUMNAS: Quita espacios invisibles y pasa a minúsculas
+    df.columns = df.columns.str.strip().str.lower()
+    
+    # Si por alguna razón Stata lo exportó como fex_c_x, lo arregla
+    if 'fex_c_x' in df.columns:
+        df.rename(columns={'fex_c_x': 'fex'}, inplace=True)
+        
+    if 'fex' not in df.columns:
+        st.error(f"🚨 Aún no encuentro 'fex'. Columnas disponibles: {list(df.columns)}")
         st.stop()
     
     df['fecha'] = pd.to_datetime(df['fecha'])
     
     for col in ['ocupados', 'desocupados', 'inactivos']:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
     df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
     
@@ -66,41 +77,42 @@ def load_data_v2():
         '3': '4 o más', '3.0': '4 o más'
     })
     
-    # Manejo de la nueva variable de dominio (Áreas Metropolitanas)
     if 'dominio_dane' in df.columns:
         df['dominio_dane'] = df['dominio_dane'].astype(str).replace({
             '1': '13 Ciudades y AM', '1.0': '13 Ciudades y AM',
             '2': 'Otras 10 Ciudades', '2.0': 'Otras 10 Ciudades'
         })
-        # Tratar nulos o valores inesperados como "Otro"
         condicion = df['dominio_dane'].isin(['13 Ciudades y AM', 'Otras 10 Ciudades'])
         df['dominio_dane'] = np.where(condicion, df['dominio_dane'], 'Otro')
     else:
         df['dominio_dane'] = 'Otro'
     
-    # --- MANEJO DE NULOS ESTRICTO TIPO STATA ---
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
     
-    # Solo 1.0 para formal, 0.0 para informal. TODO LO DEMÁS ES NaN.
-    condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
-    df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
-                                np.where(condicion_formal == 'informal', 0.0, np.nan))
-                                
-    df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
-    
+    if 'formal_ss' in df.columns:
+        condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
+        df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
+                                    np.where(condicion_formal == 'informal', 0.0, np.nan))
+    else:
+        df['formal_num'] = np.nan
+                                    
+    if 'participa' in df.columns:
+        df['part_num'] = np.where(df['participa'].astype(str).str.strip().str.lower() == 'participa', 1.0, 0.0)
+    else:
+        df['part_num'] = np.nan
+        
     return df
 
-# Llamamos a la nueva función
-df = load_data_v2()
+df = load_data_v5()
 
 # 3. PANEL LATERAL (FILTROS)
 st.sidebar.markdown("### Filtros")
 
-clase_opt = sorted(df['clase'].dropna().unique())
-estrato_opt = sorted(df['estrato'].dropna().unique())
+clase_opt = sorted(df['clase'].dropna().unique()) if 'clase' in df.columns else []
+estrato_opt = sorted(df['estrato'].dropna().unique()) if 'estrato' in df.columns else []
 dominio_opt = sorted(df['dominio_dane'].dropna().unique())
 tam_hogar_opt = ["Unipersonal", "2-3 Personas", "4 o más"] 
-nivel_opt = sorted(df['nivel_educ'].dropna().unique())
+nivel_opt = sorted(df['nivel_educ'].dropna().unique()) if 'nivel_educ' in df.columns else []
 
 st.sidebar.markdown("**Filtros Poblacionales**")
 clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=clase_opt)
@@ -126,15 +138,15 @@ suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
 # 4. PROCESAMIENTO DE DATOS MACRO
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# Quitamos los filtros de hijos_05 y asiste_institucioneducativa
-df_geo = df[
+# Filtros
+mask_geo = (
     (df['clase'].isin(clase_sel)) & 
     (df['dominio_dane'].isin(dominio_sel)) &
     (df['estrato'].isin(estrato_sel)) &
     (df['nivel_educ'].isin(nivel_sel)) &
     (df['tamaño_hogar'].isin(tam_hogar_sel))
-].copy()
-
+)
+df_geo = df[mask_geo].copy()
 df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
 
 def aplicar_ventana(data, ventana):
@@ -183,11 +195,9 @@ else:
     st.warning("La selección de filtros no arrojó resultados.")
     st.stop()
 
-
-# 6. HEADER (Sin KPIs, solo el título)
+# 6. HEADER
 st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 st.markdown("---")
-
 
 # 7. FUNCIÓN GENERADORA DE TABLAS DiD
 def calc_did_table(metric, is_pct=True):
@@ -276,7 +286,6 @@ def dibujar_fila(metric, label, is_pct=True):
     ts_2528 = ts[ts['young'] == 'Hombres 25-28'].dropna(subset=[f'{metric}_S'])
     ts_2932 = ts[ts['young'] == 'Hombres 29-32'].dropna(subset=[f'{metric}_S'])
     
-    # Escala global unificada
     all_vals = pd.concat([ts_1824[f'{metric}_S'], ts_2528[f'{metric}_S'], ts_2932[f'{metric}_S']])
     if not all_vals.empty:
         y_min, y_max = all_vals.min(), all_vals.max()
@@ -299,7 +308,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        # Actualizando los ejes Y con Títulos
         fig1.update_yaxes(title_text="Tratamiento 18-24", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig1.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig1.update_xaxes(showgrid=False)
@@ -315,7 +323,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.add_vline(x=fecha_ley.timestamp()*1000, line_dash="dash", line_color="#39ff14")
         
-        # Actualizando los ejes Y con Títulos
         fig2.update_yaxes(title_text="Tratamiento 25-28", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig2.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
         fig2.update_xaxes(showgrid=False)
