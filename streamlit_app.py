@@ -43,10 +43,11 @@ def format_num(num):
     return f"{num:.0f}"
 
 # 2. CARGA DE DATOS
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_data():
     try:
-        df = pd.read_parquet("datos_tesis.parquet") 
+        url = "https://github.com/Karen1085/visualizacion_datos_militar/raw/main/datos_tesis.parquet"
+        df = pd.read_parquet(url) 
     except:
         st.warning("No se encontró 'datos_tesis.parquet'. Usando datos de prueba.")
         df = pd.DataFrame()
@@ -64,6 +65,18 @@ def load_data():
         '2': '2-3 Personas', '2.0': '2-3 Personas',
         '3': '4 o más', '3.0': '4 o más'
     })
+    
+    # Manejo de la nueva variable de dominio (Áreas Metropolitanas)
+    if 'dominio_dane' in df.columns:
+        df['dominio_dane'] = df['dominio_dane'].astype(str).replace({
+            '1': '13 Ciudades y AM', '1.0': '13 Ciudades y AM',
+            '2': 'Otras 10 Ciudades', '2.0': 'Otras 10 Ciudades'
+        })
+        # Tratar nulos o valores inesperados como "Otro"
+        condicion = df['dominio_dane'].isin(['13 Ciudades y AM', 'Otras 10 Ciudades'])
+        df['dominio_dane'] = np.where(condicion, df['dominio_dane'], 'Otro')
+    else:
+        df['dominio_dane'] = 'Otro'
     
     # --- MANEJO DE NULOS ESTRICTO TIPO STATA ---
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
@@ -84,20 +97,18 @@ st.sidebar.markdown("### Filtros")
 
 clase_opt = sorted(df['clase'].dropna().unique())
 estrato_opt = sorted(df['estrato'].dropna().unique())
-hijos_opt = sorted(df['hijos_05'].dropna().unique())
+dominio_opt = sorted(df['dominio_dane'].dropna().unique())
 tam_hogar_opt = ["Unipersonal", "2-3 Personas", "4 o más"] 
-asiste_opt = sorted(df['asiste_institucioneducativa'].dropna().unique())
 nivel_opt = sorted(df['nivel_educ'].dropna().unique())
 
 st.sidebar.markdown("**Filtros Poblacionales**")
 clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=clase_opt)
+dominio_sel = st.sidebar.multiselect("Área Geográfica", dominio_opt, default=dominio_opt)
 estrato_sel = st.sidebar.multiselect("Estrato", estrato_opt, default=estrato_opt)
 nivel_sel = st.sidebar.multiselect("Nivel Educativo", nivel_opt, default=nivel_opt)
 
 with st.sidebar.expander("Más filtros del hogar"):
-    hijos_sel = st.sidebar.multiselect("Hijos 0-5 años", hijos_opt, default=hijos_opt)
     tam_hogar_sel = st.sidebar.multiselect("Tamaño del Hogar", tam_hogar_opt, default=tam_hogar_opt)
-    asiste_sel = st.sidebar.multiselect("Asiste Inst. Educativa", asiste_opt, default=asiste_opt)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Filtros de Ocupación** (Afectan Salario y Formalidad)")
@@ -116,11 +127,10 @@ fecha_ley = pd.to_datetime('2016-05-01')
 
 df_geo = df[
     (df['clase'].isin(clase_sel)) & 
+    (df['dominio_dane'].isin(dominio_sel)) &
     (df['estrato'].isin(estrato_sel)) &
     (df['nivel_educ'].isin(nivel_sel)) &
-    (df['hijos_05'].isin(hijos_sel)) &
-    (df['tamaño_hogar'].isin(tam_hogar_sel)) &
-    (df['asiste_institucioneducativa'].isin(asiste_sel))
+    (df['tamaño_hogar'].isin(tam_hogar_sel))
 ].copy()
 
 df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
@@ -172,29 +182,9 @@ else:
     st.stop()
 
 
-# 6. HEADER Y KPIs PROMEDIOS GLOBALES
+# 6. HEADER
 st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 st.markdown("---")
-
-st.markdown("#### Promedios del Periodo Seleccionado")
-c1, c2, c3 = st.columns(3)
-
-# Cálculos de promedios para todo el periodo seleccionado
-df_part_kpi = df_geo.dropna(subset=['part_num'])
-part_prom = (df_part_kpi['part_num'] * df_part_kpi['fex']).sum() / df_part_kpi['fex'].sum() if df_part_kpi['fex'].sum() > 0 else 0
-
-df_form_kpi = df_f.dropna(subset=['formal_num'])
-form_prom = (df_form_kpi['formal_num'] * df_form_kpi['fex']).sum() / df_form_kpi['fex'].sum() if df_form_kpi['fex'].sum() > 0 else 0
-
-df_sal_kpi = df_f.dropna(subset=['ingreal'])
-sal_prom = (df_sal_kpi['ingreal'] * df_sal_kpi['fex']).sum() / df_sal_kpi['fex'].sum() if df_sal_kpi['fex'].sum() > 0 else 0
-
-c1.metric("Participación Promedio", f"{part_prom*100:.1f}%")
-c2.metric("Formalidad Promedio", f"{form_prom*100:.1f}%")
-c3.metric("Salario Real Promedio", f"${format_num(sal_prom)}")
-
-st.markdown("---")
-
 
 # 7. FUNCIÓN GENERADORA DE TABLAS DiD
 def calc_did_table(metric, is_pct=True):
