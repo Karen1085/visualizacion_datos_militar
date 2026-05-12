@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np 
-import numpy as np 
 
 # 1. CONFIGURACIÓN VISUAL (CYBERPUNK / NEON)
 st.set_page_config(page_title="Estadísticas Ley 1780", layout="wide", initial_sidebar_state="expanded")
@@ -43,9 +42,9 @@ def format_num(num):
     if num >= 1e3: return f"{num/1e3:.2f}k"
     return f"{num:.0f}"
 
-# 2. CARGA DE DATOS
-@st.cache_data(ttl=3600)
-def load_data():
+# 2. CARGA DE DATOS (Renombrada a v2 para ROMPER LA CACHÉ a la fuerza)
+@st.cache_data(ttl=3600, show_spinner="Descargando datos actualizados desde GitHub...")
+def load_data_v2():
     try:
         url = "https://github.com/Karen1085/visualizacion_datos_militar/raw/main/datos_tesis.parquet"
         df = pd.read_parquet(url) 
@@ -91,7 +90,8 @@ def load_data():
     
     return df
 
-df = load_data()
+# Llamamos a la nueva función
+df = load_data_v2()
 
 # 3. PANEL LATERAL (FILTROS)
 st.sidebar.markdown("### Filtros")
@@ -126,6 +126,7 @@ suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
 # 4. PROCESAMIENTO DE DATOS MACRO
 fecha_ley = pd.to_datetime('2016-05-01')
 
+# Quitamos los filtros de hijos_05 y asiste_institucioneducativa
 df_geo = df[
     (df['clase'].isin(clase_sel)) & 
     (df['dominio_dane'].isin(dominio_sel)) &
@@ -183,9 +184,10 @@ else:
     st.stop()
 
 
-# 6. HEADER
+# 6. HEADER (Sin KPIs, solo el título)
 st.title("Estadísticas descriptivas y análisis Ley 1780 Art. 19 y 20")
 st.markdown("---")
+
 
 # 7. FUNCIÓN GENERADORA DE TABLAS DiD
 def calc_did_table(metric, is_pct=True):
