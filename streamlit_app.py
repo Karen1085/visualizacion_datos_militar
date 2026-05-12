@@ -61,7 +61,8 @@ def load_data_v5():
         st.error(f"🚨 Aún no encuentro 'fex'. Columnas disponibles: {list(df.columns)}")
         st.stop()
     
-    df['fecha'] = pd.to_datetime(df['fecha'])
+    # --- LA CORRECCIÓN CLAVE: ESTANDARIZAR AL DÍA 1 DEL MES ---
+    df['fecha'] = pd.to_datetime(df['fecha']).dt.to_period('M').dt.to_timestamp()
     
     for col in ['ocupados', 'desocupados', 'inactivos']:
         if col in df.columns:
@@ -149,7 +150,7 @@ def aplicar_ventana(data, ventana):
     else: 
         return data[data['fecha'] != fecha_ley]
     
-    # Máscaras simétricas excluyendo mayo
+    # Máscaras simétricas excluyendo mayo rigurosamente
     mask_pre = (data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] < fecha_ley)
     mask_post = (data['fecha'] > fecha_ley) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))
     return data[mask_pre | mask_post]
@@ -309,7 +310,7 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.update_yaxes(title_text="Tratamiento 18-24", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig1.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        # Cambio de formato en el eje X para mostrar mm-yyyy
+        # Formato de meses y años
         fig1.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig1.update_layout(**layout_ui, title="18-24 años vs Control")
         st.plotly_chart(fig1, use_container_width=True)
@@ -325,7 +326,7 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.update_yaxes(title_text="Tratamiento 25-28", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig2.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        # Cambio de formato en el eje X para mostrar mm-yyyy
+        # Formato de meses y años
         fig2.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig2.update_layout(**layout_ui, title="25-28 años vs Control")
         st.plotly_chart(fig2, use_container_width=True)
