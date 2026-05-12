@@ -211,8 +211,10 @@ def calc_did_table(metric, is_pct=True):
         data = df_f.dropna(subset=['ingreal']).copy()
         val_col = 'ingreal'
 
+    # Pandas calcula esto usando TODOS los decimales reales (float64)
     def w_mean(grp):
-        return (grp[val_col] * grp['fex']).sum() / grp['fex'].sum() if grp['fex'].sum() > 0 else np.nan
+        suma_fex = grp['fex'].sum()
+        return (grp[val_col] * grp['fex']).sum() / suma_fex if suma_fex > 0 else np.nan
 
     if data.empty: return {}
     agg = data.groupby(['young', 'Periodo']).apply(w_mean).unstack()
@@ -220,6 +222,7 @@ def calc_did_table(metric, is_pct=True):
     for p in ['Pre-Ley', 'Post-Ley']:
         if p not in agg.columns: agg[p] = np.nan
         
+    # La resta se hace con los números crudos (sin redondear)
     agg['Var'] = agg['Post-Ley'] - agg['Pre-Ley']
     
     def get_val(grupo, col): return agg.loc[grupo, col] if grupo in agg.index else np.nan
@@ -248,12 +251,15 @@ def calc_did_table(metric, is_pct=True):
         var = get_val(f['grupo'], 'Var')
         
         if is_pct:
+            # Redondeo visual: 1 decimal Pre/Post, 2 decimales para la Variación y DiD
             pre_str = f"{pre*100:.1f}" if pd.notnull(pre) else "--"
             post_str = f"{post*100:.1f}" if pd.notnull(post) else "--"
             var_str = f"{var*100:+.2f}" if pd.notnull(var) else "--"
+            
             if f['grupo'] == 'Hombres 29-32':
                 did_str = "<span class='base'>Línea Base</span>"
             else:
+                # Cálculo de DiD con valores crudos
                 did = (var - ctrl_var) * 100 if pd.notnull(var) and pd.notnull(ctrl_var) else np.nan
                 did_str = f"<span class='highlight'>{did:+.2f}</span>" if pd.notnull(did) else "--"
         else:
