@@ -47,7 +47,7 @@ def format_num(num):
 @st.cache_data(ttl=3600)
 def load_data():
     try:
-        url = "https://github.com/Karen1085/visualizacion_datos_militar/blob/main/datos_tesis.parquet"
+        url = "https://github.com/Karen1085/visualizacion_datos_militar/raw/main/datos_tesis.parquet"
         df = pd.read_parquet(url) 
     except:
         st.warning("No se encontró 'datos_tesis.parquet'. Usando datos de prueba.")
