@@ -42,7 +42,7 @@ def format_num(num):
     if num >= 1e3: return f"{num/1e3:.2f}k"
     return f"{num:.0f}"
 
-# 2. CARGA DE DATOS (v5 - Limpieza extrema de nombres)
+# 2. CARGA DE DATOS
 @st.cache_data(ttl=3600, show_spinner="Descargando y limpiando datos...")
 def load_data_v5():
     try:
@@ -52,10 +52,8 @@ def load_data_v5():
         st.error(f"Error descargando el archivo Parquet: {e}")
         st.stop()
         
-    # LIMPIEZA DE COLUMNAS: Quita espacios invisibles y pasa a minúsculas
     df.columns = df.columns.str.strip().str.lower()
     
-    # Si por alguna razón Stata lo exportó como fex_c_x, lo arregla
     if 'fex_c_x' in df.columns:
         df.rename(columns={'fex_c_x': 'fex'}, inplace=True)
         
@@ -70,12 +68,6 @@ def load_data_v5():
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
     df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
-    
-    df['tamaño_hogar'] = df['tamaño_hogar'].astype(str).replace({
-        '1': 'Unipersonal', '1.0': 'Unipersonal',
-        '2': '2-3 Personas', '2.0': '2-3 Personas',
-        '3': '4 o más', '3.0': '4 o más'
-    })
     
     if 'dominio_dane' in df.columns:
         df['dominio_dane'] = df['dominio_dane'].astype(str).replace({
@@ -99,7 +91,6 @@ def load_data_v5():
     # --- CORRECCIÓN EN FORMALIDAD ---
     if 'formal_ss' in df.columns:
         condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
-        # Asignamos 1 a formal, 0 a informal, y NaN a los demás (desocupados e inactivos)
         df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
                                     np.where(condicion_formal == 'informal', 0.0, np.nan))
     else:
@@ -120,17 +111,11 @@ st.sidebar.markdown("### Filtros")
 clase_opt = sorted(df['clase'].dropna().unique()) if 'clase' in df.columns else []
 estrato_opt = sorted(df['estrato'].dropna().unique()) if 'estrato' in df.columns else []
 dominio_opt = sorted(df['dominio_dane'].dropna().unique())
-tam_hogar_opt = ["Unipersonal", "2-3 Personas", "4 o más"] 
-nivel_opt = sorted(df['nivel_educ'].dropna().unique()) if 'nivel_educ' in df.columns else []
 
 st.sidebar.markdown("**Filtros Poblacionales**")
 clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=clase_opt)
 dominio_sel = st.sidebar.multiselect("Área Geográfica", dominio_opt, default=dominio_opt)
 estrato_sel = st.sidebar.multiselect("Estrato", estrato_opt, default=estrato_opt)
-nivel_sel = st.sidebar.multiselect("Nivel Educativo", nivel_opt, default=nivel_opt)
-
-with st.sidebar.expander("Más filtros del hogar"):
-    tam_hogar_sel = st.sidebar.multiselect("Tamaño del Hogar", tam_hogar_opt, default=tam_hogar_opt)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Filtros de Ocupación** (Afectan Salario y Formalidad)")
@@ -139,31 +124,35 @@ pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=pos_o
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Configuración Temporal**")
-ventana_sel = st.sidebar.radio("Ventana de Tiempo (Ref: Mayo 2016)", 
+ventana_sel = st.sidebar.radio("Ventana de Tiempo (Ref: Mayo 2016 excluido)", 
                                ["1. 6m antes y 6m después", "2. 12m antes y 12m después", "3. 24m antes y 24m después", "4. Todo el periodo"])
 
-suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil)", 1, 12, 3)
+suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil para gráficos)", 1, 12, 3)
 
 # 4. PROCESAMIENTO DE DATOS MACRO
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# Filtros
+# Filtros aplicados
 mask_geo = (
     (df['clase'].isin(clase_sel)) & 
     (df['dominio_dane'].isin(dominio_sel)) &
-    (df['estrato'].isin(estrato_sel)) &
-    (df['nivel_educ'].isin(nivel_sel)) &
-    (df['tamaño_hogar'].isin(tam_hogar_sel))
+    (df['estrato'].isin(estrato_sel))
 )
 df_geo = df[mask_geo].copy()
 df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
 
 def aplicar_ventana(data, ventana):
+    # Exclusión de mayo de 2016 en todos los casos
     if "1." in ventana: m = 6
     elif "2." in ventana: m = 12
     elif "3." in ventana: m = 24
-    else: return data
-    return data[(data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))]
+    else: 
+        return data[data['fecha'] != fecha_ley]
+    
+    # Máscaras simétricas excluyendo mayo
+    mask_pre = (data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] < fecha_ley)
+    mask_post = (data['fecha'] > fecha_ley) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))
+    return data[mask_pre | mask_post]
 
 df_geo = aplicar_ventana(df_geo, ventana_sel)
 df_f = aplicar_ventana(df_f, ventana_sel)
@@ -178,12 +167,10 @@ def get_stats_geo(x):
     return pd.Series([p], index=['Participacion'])
 
 def get_stats_f(x):
-    # Se ignora automáticamente a desocupados e inactivos (NaN)
     df_form = x.dropna(subset=['formal_num'])
     w_f = df_form['fex'].sum()
     f = (df_form['formal_num'] * df_form['fex']).sum() / w_f if w_f > 0 else np.nan
     
-    # Se ignora automáticamente a los falsos ceros (NaN)
     df_sal = x.dropna(subset=['ingreal'])
     w_s = df_sal['fex'].sum()
     s = (df_sal['ingreal'] * df_sal['fex']).sum() / w_s if w_s > 0 else np.nan
@@ -322,7 +309,8 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.update_yaxes(title_text="Tratamiento 18-24", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig1.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        fig1.update_xaxes(showgrid=False)
+        # Cambio de formato en el eje X para mostrar mm-yyyy
+        fig1.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig1.update_layout(**layout_ui, title="18-24 años vs Control")
         st.plotly_chart(fig1, use_container_width=True)
         
@@ -337,7 +325,8 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.update_yaxes(title_text="Tratamiento 25-28", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig2.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        fig2.update_xaxes(showgrid=False)
+        # Cambio de formato en el eje X para mostrar mm-yyyy
+        fig2.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig2.update_layout(**layout_ui, title="25-28 años vs Control")
         st.plotly_chart(fig2, use_container_width=True)
         
