@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np 
+import numpy as np
 
 # 1. CONFIGURACIÓN VISUAL (CYBERPUNK / NEON)
 st.set_page_config(page_title="Estadísticas Ley 1780", layout="wide", initial_sidebar_state="expanded")
