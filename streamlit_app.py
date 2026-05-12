@@ -87,10 +87,19 @@ def load_data_v5():
     else:
         df['dominio_dane'] = 'Otro'
     
+    # --- CORRECCIÓN EN SALARIOS (Falsos Ceros) ---
     df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
+    df['ingreal'] = np.where(
+        (df['ingreal'] == 0) & 
+        (df['posicion_ocupacional'].astype(str).str.contains('Asalariados|Cuenta propia', case=False, na=False)), 
+        np.nan, 
+        df['ingreal']
+    )
     
+    # --- CORRECCIÓN EN FORMALIDAD ---
     if 'formal_ss' in df.columns:
         condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
+        # Asignamos 1 a formal, 0 a informal, y NaN a los demás (desocupados e inactivos)
         df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
                                     np.where(condicion_formal == 'informal', 0.0, np.nan))
     else:
@@ -169,13 +178,16 @@ def get_stats_geo(x):
     return pd.Series([p], index=['Participacion'])
 
 def get_stats_f(x):
+    # Se ignora automáticamente a desocupados e inactivos (NaN)
     df_form = x.dropna(subset=['formal_num'])
     w_f = df_form['fex'].sum()
     f = (df_form['formal_num'] * df_form['fex']).sum() / w_f if w_f > 0 else np.nan
     
+    # Se ignora automáticamente a los falsos ceros (NaN)
     df_sal = x.dropna(subset=['ingreal'])
     w_s = df_sal['fex'].sum()
     s = (df_sal['ingreal'] * df_sal['fex']).sum() / w_s if w_s > 0 else np.nan
+    
     return pd.Series([f, s], index=['Formalidad', 'Salario'])
 
 if not df_geo.empty:
