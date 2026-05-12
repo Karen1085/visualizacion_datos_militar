@@ -109,10 +109,9 @@ clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=cla
 dominio_sel = st.sidebar.multiselect("Área Geográfica", dominio_opt, default=dominio_opt)
 estrato_sel = st.sidebar.multiselect("Estrato", estrato_opt, default=estrato_opt)
 
-# REGRESAMOS EL FILTRO MANUAL
+# FILTRO MANUAL ACTIVO
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Filtros de Ocupación** (Afectan Salario y Formalidad)")
-# Sacamos 'No aplica' visualmente para que no confunda al usuario
 pos_opt = [p for p in df['posicion_ocupacional'].unique() if p != 'No aplica']
 pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=pos_opt)
 
@@ -134,22 +133,24 @@ mask_geo = (
 )
 df_geo = df[mask_geo].copy()
 
-# APLICAMOS EL FILTRO MANUAL, PERO RESCATANDO SILENCIOSAMENTE 'NO APLICA'
-# Esto asegura que cuadre matemáticamente con el Colab que mantiene esa categoría viva.
+# APLICAMOS EL FILTRO MANUAL (Rescatando 'No aplica' silenciosamente)
 mask_pos = df_geo['posicion_ocupacional'].isin(pos_sel) | (df_geo['posicion_ocupacional'] == 'No aplica')
 df_f = df_geo[mask_pos].copy()
 
 def aplicar_ventana(data, ventana):
+    # PRIMER PASO: SACAR MAYO 2016 DEFINITIVAMENTE DE LOS CÁLCULOS
+    data_limpia = data[data['fecha'] != fecha_ley].copy()
+
     if "1." in ventana: m = 6
     elif "2." in ventana: m = 12
     elif "3." in ventana: m = 24
     else: 
-        return data[data['fecha'] != fecha_ley]
+        return data_limpia
     
-    # Excluyendo Mayo rigurosamente
-    mask_pre = (data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] < fecha_ley)
-    mask_post = (data['fecha'] > fecha_ley) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))
-    return data[mask_pre | mask_post]
+    # Máscaras estrictas excluyendo mayo
+    mask_pre = (data_limpia['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data_limpia['fecha'] < fecha_ley)
+    mask_post = (data_limpia['fecha'] > fecha_ley) & (data_limpia['fecha'] <= fecha_ley + pd.DateOffset(months=m))
+    return data_limpia[mask_pre | mask_post]
 
 df_geo = aplicar_ventana(df_geo, ventana_sel)
 df_f = aplicar_ventana(df_f, ventana_sel)
@@ -168,7 +169,6 @@ def get_stats_f(x):
     w_f = df_form['fex'].sum()
     f = (df_form['formal_num'] * df_form['fex']).sum() / w_f if w_f > 0 else np.nan
     
-    # CÁLCULO DE SALARIO IDÉNTICO AL COLAB (> 0 explícito)
     df_sal = x[(x['ingreal'].notna()) & (x['ingreal'] > 0)]
     w_s = df_sal['fex'].sum()
     s = (df_sal['ingreal'] * df_sal['fex']).sum() / w_s if w_s > 0 else np.nan
@@ -205,7 +205,6 @@ def calc_did_table(metric, is_pct=True):
         data = df_f.dropna(subset=['formal_num']).copy()
         val_col = 'formal_num'
     else:
-        # CÁLCULO DE SALARIO IDÉNTICO AL COLAB (> 0 explícito para la tabla)
         data = df_f[(df_f['ingreal'].notna()) & (df_f['ingreal'] > 0)].copy()
         val_col = 'ingreal'
 
@@ -247,8 +246,8 @@ def calc_did_table(metric, is_pct=True):
         var = get_val(f['grupo'], 'Var')
         
         if is_pct:
-            pre_str = f"{pre*100:.2f}" if pd.notnull(pre) else "--"
-            post_str = f"{post*100:.2f}" if pd.notnull(post) else "--"
+            pre_str = f"{pre*100:.1f}" if pd.notnull(pre) else "--"
+            post_str = f"{post*100:.1f}" if pd.notnull(post) else "--"
             var_str = f"{var*100:+.2f}" if pd.notnull(var) else "--"
             
             if f['grupo'] == 'Hombres 29-32':
@@ -257,14 +256,14 @@ def calc_did_table(metric, is_pct=True):
                 did = (var - ctrl_var) * 100 if pd.notnull(var) and pd.notnull(ctrl_var) else np.nan
                 did_str = f"<span class='highlight'>{did:+.2f}</span>" if pd.notnull(did) else "--"
         else:
-            pre_str = f"${pre:,.0f}" if pd.notnull(pre) else "--"
-            post_str = f"${post:,.0f}" if pd.notnull(post) else "--"
-            var_str = f"{var:+.0f}" if pd.notnull(var) else "--"
+            pre_str = f"${pre:,.1f}" if pd.notnull(pre) else "--"
+            post_str = f"${post:,.1f}" if pd.notnull(post) else "--"
+            var_str = f"{var:+.2f}" if pd.notnull(var) else "--"
             if f['grupo'] == 'Hombres 29-32':
                 did_str = "<span class='base'>Línea Base</span>"
             else:
                 did = (var - ctrl_var) if pd.notnull(var) and pd.notnull(ctrl_var) else np.nan
-                did_str = f"<span class='highlight'>{did:+.0f}</span>" if pd.notnull(did) else "--"
+                did_str = f"<span class='highlight'>{did:+.2f}</span>" if pd.notnull(did) else "--"
 
         html += f"<tr><td>{f['nombre']}</td><td>{pre_str}</td><td>{post_str}</td><td>{var_str}</td><td>{did_str}</td></tr>"
         
