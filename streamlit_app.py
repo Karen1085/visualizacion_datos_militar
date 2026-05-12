@@ -61,7 +61,7 @@ def load_data_v5():
         st.error(f"🚨 Aún no encuentro 'fex'. Columnas disponibles: {list(df.columns)}")
         st.stop()
     
-    # --- LA CORRECCIÓN CLAVE: ESTANDARIZAR AL DÍA 1 DEL MES ---
+    # Estandarizar al día 1 del mes para asegurar cortes perfectos
     df['fecha'] = pd.to_datetime(df['fecha']).dt.to_period('M').dt.to_timestamp()
     
     for col in ['ocupados', 'desocupados', 'inactivos']:
@@ -69,6 +69,7 @@ def load_data_v5():
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
     df['posicion_ocupacional'] = df['posicion_ocupacional'].astype('object').fillna('No aplica')
+    df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
     
     if 'dominio_dane' in df.columns:
         df['dominio_dane'] = df['dominio_dane'].astype(str).replace({
@@ -80,16 +81,6 @@ def load_data_v5():
     else:
         df['dominio_dane'] = 'Otro'
     
-    # --- CORRECCIÓN EN SALARIOS (Falsos Ceros) ---
-    df['ingreal'] = pd.to_numeric(df['ingreal'], errors='coerce')
-    df['ingreal'] = np.where(
-        (df['ingreal'] == 0) & 
-        (df['posicion_ocupacional'].astype(str).str.contains('Asalariados|Cuenta propia', case=False, na=False)), 
-        np.nan, 
-        df['ingreal']
-    )
-    
-    # --- CORRECCIÓN EN FORMALIDAD ---
     if 'formal_ss' in df.columns:
         condicion_formal = df['formal_ss'].astype(str).str.strip().str.lower()
         df['formal_num'] = np.where(condicion_formal == 'formal', 1.0, 
@@ -118,8 +109,10 @@ clase_sel = st.sidebar.multiselect("Zona (Urbano/Rural)", clase_opt, default=cla
 dominio_sel = st.sidebar.multiselect("Área Geográfica", dominio_opt, default=dominio_opt)
 estrato_sel = st.sidebar.multiselect("Estrato", estrato_opt, default=estrato_opt)
 
+# REGRESAMOS EL FILTRO MANUAL
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Filtros de Ocupación** (Afectan Salario y Formalidad)")
+# Sacamos 'No aplica' visualmente para que no confunda al usuario
 pos_opt = [p for p in df['posicion_ocupacional'].unique() if p != 'No aplica']
 pos_sel = st.sidebar.multiselect("Posición Ocupacional", pos_opt, default=pos_opt)
 
@@ -133,24 +126,27 @@ suavizado = st.sidebar.slider("Meses de Suavizado (Media Móvil para gráficos)"
 # 4. PROCESAMIENTO DE DATOS MACRO
 fecha_ley = pd.to_datetime('2016-05-01')
 
-# Filtros aplicados
+# Se rescatan nulos para no perder el denominador global de participación
 mask_geo = (
-    (df['clase'].isin(clase_sel)) & 
-    (df['dominio_dane'].isin(dominio_sel)) &
-    (df['estrato'].isin(estrato_sel))
+    (df['clase'].isin(clase_sel) | df['clase'].isna()) & 
+    (df['dominio_dane'].isin(dominio_sel) | df['dominio_dane'].isna()) &
+    (df['estrato'].isin(estrato_sel) | df['estrato'].isna())
 )
 df_geo = df[mask_geo].copy()
-df_f = df_geo[df_geo['posicion_ocupacional'].isin(pos_sel)].copy()
+
+# APLICAMOS EL FILTRO MANUAL, PERO RESCATANDO SILENCIOSAMENTE 'NO APLICA'
+# Esto asegura que cuadre matemáticamente con el Colab que mantiene esa categoría viva.
+mask_pos = df_geo['posicion_ocupacional'].isin(pos_sel) | (df_geo['posicion_ocupacional'] == 'No aplica')
+df_f = df_geo[mask_pos].copy()
 
 def aplicar_ventana(data, ventana):
-    # Exclusión de mayo de 2016 en todos los casos
     if "1." in ventana: m = 6
     elif "2." in ventana: m = 12
     elif "3." in ventana: m = 24
     else: 
         return data[data['fecha'] != fecha_ley]
     
-    # Máscaras simétricas excluyendo mayo rigurosamente
+    # Excluyendo Mayo rigurosamente
     mask_pre = (data['fecha'] >= fecha_ley - pd.DateOffset(months=m)) & (data['fecha'] < fecha_ley)
     mask_post = (data['fecha'] > fecha_ley) & (data['fecha'] <= fecha_ley + pd.DateOffset(months=m))
     return data[mask_pre | mask_post]
@@ -172,7 +168,8 @@ def get_stats_f(x):
     w_f = df_form['fex'].sum()
     f = (df_form['formal_num'] * df_form['fex']).sum() / w_f if w_f > 0 else np.nan
     
-    df_sal = x.dropna(subset=['ingreal'])
+    # CÁLCULO DE SALARIO IDÉNTICO AL COLAB (> 0 explícito)
+    df_sal = x[(x['ingreal'].notna()) & (x['ingreal'] > 0)]
     w_s = df_sal['fex'].sum()
     s = (df_sal['ingreal'] * df_sal['fex']).sum() / w_s if w_s > 0 else np.nan
     
@@ -208,10 +205,10 @@ def calc_did_table(metric, is_pct=True):
         data = df_f.dropna(subset=['formal_num']).copy()
         val_col = 'formal_num'
     else:
-        data = df_f.dropna(subset=['ingreal']).copy()
+        # CÁLCULO DE SALARIO IDÉNTICO AL COLAB (> 0 explícito para la tabla)
+        data = df_f[(df_f['ingreal'].notna()) & (df_f['ingreal'] > 0)].copy()
         val_col = 'ingreal'
 
-    # Pandas calcula esto usando TODOS los decimales reales (float64)
     def w_mean(grp):
         suma_fex = grp['fex'].sum()
         return (grp[val_col] * grp['fex']).sum() / suma_fex if suma_fex > 0 else np.nan
@@ -222,7 +219,6 @@ def calc_did_table(metric, is_pct=True):
     for p in ['Pre-Ley', 'Post-Ley']:
         if p not in agg.columns: agg[p] = np.nan
         
-    # La resta se hace con los números crudos (sin redondear)
     agg['Var'] = agg['Post-Ley'] - agg['Pre-Ley']
     
     def get_val(grupo, col): return agg.loc[grupo, col] if grupo in agg.index else np.nan
@@ -251,15 +247,13 @@ def calc_did_table(metric, is_pct=True):
         var = get_val(f['grupo'], 'Var')
         
         if is_pct:
-            # Redondeo visual: 1 decimal Pre/Post, 2 decimales para la Variación y DiD
-            pre_str = f"{pre*100:.1f}" if pd.notnull(pre) else "--"
-            post_str = f"{post*100:.1f}" if pd.notnull(post) else "--"
+            pre_str = f"{pre*100:.2f}" if pd.notnull(pre) else "--"
+            post_str = f"{post*100:.2f}" if pd.notnull(post) else "--"
             var_str = f"{var*100:+.2f}" if pd.notnull(var) else "--"
             
             if f['grupo'] == 'Hombres 29-32':
                 did_str = "<span class='base'>Línea Base</span>"
             else:
-                # Cálculo de DiD con valores crudos
                 did = (var - ctrl_var) * 100 if pd.notnull(var) and pd.notnull(ctrl_var) else np.nan
                 did_str = f"<span class='highlight'>{did:+.2f}</span>" if pd.notnull(did) else "--"
         else:
@@ -316,7 +310,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig1.update_yaxes(title_text="Tratamiento 18-24", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig1.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        # Formato de meses y años
         fig1.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig1.update_layout(**layout_ui, title="18-24 años vs Control")
         st.plotly_chart(fig1, use_container_width=True)
@@ -332,7 +325,6 @@ def dibujar_fila(metric, label, is_pct=True):
         
         fig2.update_yaxes(title_text="Tratamiento 25-28", range=rango, tickformat=formato, secondary_y=False, showgrid=False)
         fig2.update_yaxes(title_text="Control 29-32", range=rango, tickformat=formato, secondary_y=True, showgrid=False)
-        # Formato de meses y años
         fig2.update_xaxes(showgrid=False, tickformat="%m-%Y")
         fig2.update_layout(**layout_ui, title="25-28 años vs Control")
         st.plotly_chart(fig2, use_container_width=True)
